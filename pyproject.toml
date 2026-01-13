@@ -1,0 +1,26 @@
+[project]
+name = "debugger-agent"
+version = "0.1.0"
+description = "A debugging agent that drives a real pdb session, served from Modal"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "pexpect>=4.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["common*", "harness*"]
+
+[tool.pytest.ini_options]
+testpaths = ["common", "harness"]
+python_files = ["test_*.py"]
