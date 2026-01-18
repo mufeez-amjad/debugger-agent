@@ -93,3 +93,23 @@ class TestParseXmlToolCalls:
         content = '<tool_call>\n{"name": "done", "arguments": 42}\n</tool_call>'
         result = parse_xml_tool_calls(content)
         assert result[0]["function"]["arguments"] == "{}"
+
+
+class TestCreateDebuggingTools:
+    def test_all_tools_included(self):
+        tools = create_debugging_tools(use_debugging_tools=True)
+        names = {t["function"]["name"] for t in tools}
+        assert set(TOOL_NAMES) == names
+
+    def test_non_debugging_only(self):
+        tools = create_debugging_tools(use_debugging_tools=False)
+        names = {t["function"]["name"] for t in tools}
+        assert "bash" in names
+        assert "step_over" not in names
+
+    def test_openai_format(self):
+        tools = create_debugging_tools()
+        for t in tools:
+            assert t["type"] == "function"
+            assert "name" in t["function"]
+            assert "parameters" in t["function"]
