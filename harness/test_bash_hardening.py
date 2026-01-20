@@ -64,6 +64,55 @@ def test_bang_does_not_trigger_history_expansion():
 # range-read past EOF gets an explicit line-count note
 # --------------------------------------------------------------------------- #
 
+def test_sed_range_past_eof_gets_note():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d).resolve()
+        (root / "small.py").write_text("a\nb\nc\n")
+        s = BashSession(root, timeout=5)
+        try:
+            out = s.execute("sed -n '71,74p' small.py")
+            assert "has 3 lines" in out
+            assert "beyond EOF" in out
+        finally:
+            s.close()
+
+
+def test_tail_plus_range_past_eof_gets_note():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d).resolve()
+        (root / "small.py").write_text("a\nb\n")
+        s = BashSession(root, timeout=5)
+        try:
+            out = s.execute("tail -n +50 small.py")
+            assert "has 2 lines" in out
+        finally:
+            s.close()
+
+
+def test_sed_range_within_file_gets_no_note():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d).resolve()
+        (root / "small.py").write_text("a\nb\nc\nd\n")
+        s = BashSession(root, timeout=5)
+        try:
+            out = s.execute("sed -n '1,2p' small.py")
+            assert "beyond EOF" not in out
+            assert "a" in out and "b" in out
+        finally:
+            s.close()
+
+
+def test_plain_no_output_command_unaffected():
+    with tempfile.TemporaryDirectory() as d:
+        s = BashSession(Path(d).resolve(), timeout=5)
+        try:
+            out = s.execute("true")
+            assert "Command executed with no output" in out
+            assert "beyond EOF" not in out
+        finally:
+            s.close()
+
+
 # --------------------------------------------------------------------------- #
 # middle truncation keeps head AND tail (first traceback + summary)
 # --------------------------------------------------------------------------- #
