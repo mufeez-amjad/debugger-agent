@@ -165,6 +165,44 @@ def test_byte_truncation_preserves_tail_and_exit_code():
 # the shell self-heals after being bricked / after a timeout
 # --------------------------------------------------------------------------- #
 
+def test_shell_self_heals_after_kill():
+    with tempfile.TemporaryDirectory() as d:
+        s = BashSession(Path(d).resolve(), timeout=5)
+        try:
+            s.execute("kill -9 $$")  # kills the persistent bash
+            out = s.execute("echo alive")
+            assert "alive" in out, out
+        finally:
+            s.close()
+
+
+def test_shell_recovers_after_timeout():
+    with tempfile.TemporaryDirectory() as d:
+        s = BashSession(Path(d).resolve(), timeout=1)
+        try:
+            out = s.execute("sleep 10")
+            assert "timed out" in out
+            # the runaway sleep must not poison the next command
+            out2 = s.execute("echo recovered")
+            assert "recovered" in out2, out2
+        finally:
+            s.close()
+
+
+def test_interactive_python_repl_times_out_then_recovers():
+    # 'python with no script' (a dominant brick trigger) blocks on stdin; it must
+    # time out and the NEXT command must still work.
+    with tempfile.TemporaryDirectory() as d:
+        s = BashSession(Path(d).resolve(), timeout=1)
+        try:
+            out = s.execute("python3")
+            assert "timed out" in out
+            out2 = s.execute("echo back")
+            assert "back" in out2, out2
+        finally:
+            s.close()
+
+
 if __name__ == "__main__":
     import pytest
 
