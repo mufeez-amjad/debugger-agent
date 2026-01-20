@@ -117,6 +117,50 @@ def test_plain_no_output_command_unaffected():
 # middle truncation keeps head AND tail (first traceback + summary)
 # --------------------------------------------------------------------------- #
 
+def test_middle_truncation_keeps_head_and_tail():
+    with tempfile.TemporaryDirectory() as d:
+        s = BashSession(Path(d).resolve(), timeout=5, max_output_lines=100)
+        try:
+            out = s.execute("seq 1 300")
+            assert "<TOOL_OUTPUT_TRUNCATED:" in out
+            assert "middle lines omitted" in out
+            # first lines survive
+            assert "\n1\n" in "\n" + out
+            # final lines survive (the pytest-summary analogue)
+            assert "300" in out
+            assert "299" in out
+            # exit-code line preserved
+            assert "Exit code: 0" in out
+        finally:
+            s.close()
+
+
+def test_small_output_not_truncated():
+    with tempfile.TemporaryDirectory() as d:
+        s = BashSession(Path(d).resolve(), timeout=5, max_output_lines=100)
+        try:
+            out = s.execute("seq 1 10")
+            assert "<TOOL_OUTPUT_TRUNCATED" not in out
+            assert "10" in out
+        finally:
+            s.close()
+
+
+def test_byte_truncation_preserves_tail_and_exit_code():
+    with tempfile.TemporaryDirectory() as d:
+        # small byte budget forces byte-based trimming; tail + exit code must live
+        s = BashSession(
+            Path(d).resolve(), timeout=5, max_output_lines=1000, max_output_bytes=300
+        )
+        try:
+            out = s.execute("for i in $(seq 1 50); do echo LINE$i; done")
+            assert "<TOOL_OUTPUT_TRUNCATED:" in out
+            assert "Exit code: 0" in out
+            assert "LINE50" in out  # tail survives
+        finally:
+            s.close()
+
+
 # --------------------------------------------------------------------------- #
 # the shell self-heals after being bricked / after a timeout
 # --------------------------------------------------------------------------- #
