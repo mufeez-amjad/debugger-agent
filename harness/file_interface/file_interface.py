@@ -628,3 +628,59 @@ class FileInterfaceHarness:
     # ------------------------------------------------------------------ #
     # snapshot + revert capability
     # ------------------------------------------------------------------ #
+
+    def snapshot_workspace(self) -> None:
+        """Capture the content of every .py file under the working directory.
+
+        Contract: the caller calls this once at session start, after the
+        workspace is in place and before the model acts. execute_revert_file then
+        restores from this snapshot. This gives the model a real undo, so it
+        does not guess `git checkout` or backup paths.
+        """
+        snapshot: Dict[str, str] = {}
+        root = self.working_directory
+        if root.exists():
+            for p in root.rglob("*.py"):
+                if not p.is_file():
+                    continue
+                try:
+                    snapshot[str(p.resolve())] = p.read_text(encoding=self.ENCODING)
+                except Exception:
+                    continue
+        self._snapshot = snapshot
+
+    def _execute_revert_file(self, tool_call: ToolCall) -> str:
+        """Dispatch wrapper for revert_file (see execute_revert_file)."""
+        return self.execute_revert_file(tool_call.parameters.get('file_path'))
+
+    def execute_revert_file(self, file_path: str) -> str:
+        """Restore a file to the content captured by snapshot_workspace()."""
+        if self._snapshot is None:
+            return (
+                "Error: no snapshot is available to revert to "
+                "(the workspace was not snapshotted at reset)."
+            )
+        if not file_path:
+            return "Error: No file path specified"
+        if self._is_file_protected(file_path):
+            return f"Error: Cannot revert protected file {file_path}"
+
+        full_path = self._resolve_path(file_path)
+        key = str(full_path.resolve())
+        if key not in self._snapshot:
+            return (
+                f"Error: no original snapshot exists for {file_path}. Only .py "
+                f"files present at episode reset can be reverted."
+            )
+
+        original = self._snapshot[key]
+        try:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(original, encoding=self.ENCODING)
+        except Exception as e:
+            return f"Error reverting {file_path}: {str(e)}"
+
+        n = original.count('\n') + (
+            1 if original and not original.endswith('\n') else 0
+        )
+        return f"Restored {file_path} to its original state ({n} lines)"
