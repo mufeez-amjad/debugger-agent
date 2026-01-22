@@ -269,5 +269,58 @@ class TestFileInterfaceHarness(unittest.TestCase):
         self.assertIn("No new_string", result)
 
 
+class TestIndentTolerantEdit(unittest.TestCase):
+    """Tier-3 edit_file matching: auto-apply unique leading-indent-drift matches.
+
+    Most verbatim failed-edit retries happen after the model sees a ~99%-similar
+    closest-match hint and ignores it. The difference is pure whitespace or
+    indent drift. Tier 3 auto-applies the unambiguous cases (unique stripped match + uniform indent delta), re-indenting
+    new_string to the file's indentation so the strict-indent safety still holds.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.harness = FileInterfaceHarness(self.temp_dir)
+
+    def tearDown(self):
+        if self.temp_dir and Path(self.temp_dir).exists():
+            shutil.rmtree(self.temp_dir)
+
+    def _w(self, name, content):
+        (Path(self.temp_dir) / name).write_text(content)
+
+    def _r(self, name):
+        return (Path(self.temp_dir) / name).read_text()
+
+    def _edit(self, name, old, new):
+        return self.harness.execute_tool_call(ToolCall(
+            name="edit_file",
+            parameters={"file_path": name, "old_string": old, "new_string": new},
+            reasoning="",
+        ))
+
+    def test_indent_drift_autoapplies_at_file_indent(self):
+        self._w("a.py", "class C:\n    def f(self):\n        x = foo()\n        return x\n")
+        r = self._edit("a.py", "    x = foo()\n    return x", "    x = bar()\n    return x")
+        self.assertIn("re-indented", r)
+        self.assertIn("        x = bar()\n        return x\n", self._r("a.py"))
+
+    def test_content_mismatch_still_bounces(self):
+        self._w("b.py", "        x = foo()\n")
+        r = self._edit("b.py", "    x = qux()", "    x = baz()")
+        self.assertIn("String not found", r)
+
+    def test_non_unique_stripped_match_bounces(self):
+        self._w("c.py", "    a = 1\n    b = 2\n        a = 1\n        b = 2\n")
+        r = self._edit("c.py", "  a = 1\n  b = 2", "  a = 9\n  b = 9")
+        self.assertIn("String not found", r)
+
+    def test_exact_match_unaffected(self):
+        self._w("d.py", "    y = 1\n")
+        r = self._edit("d.py", "    y = 1", "    y = 2")
+        self.assertIn("Successfully replaced", r)
+        self.assertIn("    y = 2", self._r("d.py"))
+
+
 if __name__ == "__main__":
     unittest.main()
