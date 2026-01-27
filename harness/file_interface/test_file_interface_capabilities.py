@@ -53,6 +53,36 @@ class _Base(unittest.TestCase):
         )
 
 
+class TestAnchoredEdit(_Base):
+    def test_anchor_restricts_to_window(self):
+        # Two identical 'a=0' blocks separated by >40 filler lines. block1 is at
+        # lines 1-3; block2 at lines 64-66. An anchor of 65 restricts the search
+        # to lines 45-85, so ONLY block2 is edited and block1 is left untouched.
+        block1 = "a=0\na=0\na=0"
+        filler = "\n".join(f"f{i}=0" for i in range(60))  # lines 4-63
+        block2 = "a=0\na=0\na=0"                            # lines 64-66
+        self._w("dup.py", block1 + "\n" + filler + "\n" + block2 + "\n")
+        res = self._edit("dup.py", "a=0", "a=9", anchor_line=65)
+        self.assertIn("Successfully replaced", res)
+        content = self._r("dup.py")
+        lines = content.splitlines()
+        self.assertEqual(lines[0:3], ["a=0", "a=0", "a=0"])   # block1 untouched
+        self.assertEqual(lines[63:66], ["a=9", "a=9", "a=9"])  # block2 edited
+
+    def test_no_anchor_is_backward_compatible(self):
+        self._w("p.py", "x = 1\ny = 2\n")
+        res = self._edit("p.py", "x = 1", "x = 3")
+        self.assertIn("Successfully replaced", res)
+        self.assertIn("x = 3", self._r("p.py"))
+
+    def test_anchor_out_of_window_reports_restriction(self):
+        self._w("p.py", "\n".join(f"v{i} = {i}" for i in range(1, 100)) + "\n")
+        # value v90 exists but the anchor window is around line 5.
+        res = self._edit("p.py", "v90 = 90", "v90 = 0", anchor_line=5)
+        self.assertIn("String not found", res)
+        self.assertIn("anchor_line window", res)
+
+
 class TestSnapshotRevert(_Base):
     def test_revert_restores_snapshot(self):
         p = self._w("m.py", "x = 1\ny = 2\n")
