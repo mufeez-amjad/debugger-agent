@@ -245,3 +245,54 @@ AMBIG = (
     "    def total_breached(self):\n"
     "        return sum(s.within for s in self._summaries)\n"
 )
+
+
+class TestAmbiguousEditRefusal(_Base):
+    def test_ambiguous_match_refused_file_unchanged(self):
+        self._w("reporting.py", AMBIG)
+        res = self._edit(
+            "reporting.py",
+            "        return sum(s.within for s in self._summaries)",
+            "        return sum(s.breached for s in self._summaries)",
+        )
+        self.assertIn("appears 2 times", res)
+        self.assertIn("surrounding lines", res)
+        self.assertEqual(self._r("reporting.py"), AMBIG)  # untouched
+
+    def test_widened_old_string_disambiguates(self):
+        self._w("reporting.py", AMBIG)
+        res = self._edit(
+            "reporting.py",
+            "    def total_breached(self):\n"
+            "        return sum(s.within for s in self._summaries)",
+            "    def total_breached(self):\n"
+            "        return sum(s.breached for s in self._summaries)",
+        )
+        self.assertIn("replaced 1 occurrence(s)", res)
+        content = self._r("reporting.py")
+        self.assertIn("def total_within(self):\n        return sum(s.within", content)
+        self.assertIn("def total_breached(self):\n        return sum(s.breached", content)
+
+    def test_unadvertised_replace_all_still_works(self):
+        self._w("reporting.py", AMBIG)
+        res = self._edit("reporting.py", "s.within", "s.breached", replace_all=True)
+        self.assertIn("replaced 2 occurrence(s)", res)
+        self.assertEqual(self._r("reporting.py").count("s.breached"), 2)
+
+    def test_unadvertised_anchor_line_keeps_legacy_window_semantics(self):
+        # Explicit anchor = explicit scope: replace-within-window applies
+        # (both occurrences here are inside the +/-20-line window, so both
+        # are replaced).
+        self._w("reporting.py", AMBIG)
+        res = self._edit(
+            "reporting.py",
+            "        return sum(s.within for s in self._summaries)",
+            "        return sum(s.breached for s in self._summaries)",
+            anchor_line=5,
+        )
+        self.assertIn("replaced 2 occurrence(s)", res)
+
+    def test_unique_match_unaffected(self):
+        self._w("reporting.py", AMBIG)
+        res = self._edit("reporting.py", "def total_breached", "def total_exceeded")
+        self.assertIn("replaced 1 occurrence(s)", res)
