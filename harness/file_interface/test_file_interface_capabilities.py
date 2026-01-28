@@ -132,6 +132,52 @@ class TestSyntaxValidation(_Base):
         self.assertIn("Successfully replaced", res)
 
 
+class TestNoMatchError(_Base):
+    def test_small_file_shows_whole_file_numbered(self):
+        self._w("a.py", "alpha = 1\nbeta = 2\ngamma = 3\n")
+        res = self._edit("a.py", "delta = 4", "delta = 5")
+        self.assertIn("String not found", res)
+        self.assertIn("   1| alpha = 1", res)
+        self.assertIn("   3| gamma = 3", res)
+        self.assertIn("shortest unique old_string copied from the ACTUAL", res)
+        # must NOT suggest rg/grep
+        self.assertNotIn("rg ", res)
+        self.assertNotIn("grep", res)
+
+    def test_large_file_shows_closest_region_with_context(self):
+        lines = [f"filler {i}" for i in range(1, 200)]
+        lines[120] = "    special_marker_line = 1"
+        self._w("big.py", "\n".join(lines) + "\n")
+        res = self._edit(
+            "big.py", "    special_marker_line = 999", "    special_marker_line = 2"
+        )
+        self.assertIn("String not found", res)
+        self.assertIn("Closest match", res)
+        self.assertIn("special_marker_line", res)
+        # +/-8 context around line 121 (1-based)
+        self.assertIn(" 121| ", res)
+
+    def test_mismatch_names_missing_argument_without_editing(self):
+        lines = [f"filler {i}" for i in range(1, 140)]
+        lines[130:134] = [
+            "    def walk(self, references, href):",
+            "        for i, ref in enumerate(references):",
+            '            resolver.push(f"step[{i}]", ref)',
+            "        return resolver.resolve(href)",
+        ]
+        source = "\n".join(lines) + "\n"
+        self._w("resolver.py", source)
+        old = "\n".join(lines[130:132] + [
+            '            resolver.push(f"step[{i}]")',
+            lines[133],
+        ])
+        res = self._edit("resolver.py", old, "replacement")
+        self.assertIn("old_string line 3, resolver.py line 133", res)
+        self.assertIn('requested: \'            resolver.push(f"step[{i}]")\'', res)
+        self.assertIn('actual:    \'            resolver.push(f"step[{i}]", ref)\'', res)
+        self.assertEqual(self._r("resolver.py"), source)
+
+
 class TestSnapshotRevert(_Base):
     def test_revert_restores_snapshot(self):
         p = self._w("m.py", "x = 1\ny = 2\n")
@@ -162,6 +208,23 @@ class TestSnapshotRevert(_Base):
         )
         self.assertIn("Restored", res)
         self.assertEqual(self._r("m.py"), "orig\n")
+
+
+class TestWriteHint(_Base):
+    def test_small_change_gets_edit_tip(self):
+        self._w("m.py", "a = 1\nb = 2\nc = 3\n")
+        res = self._write("m.py", "a = 1\nb = 99\nc = 3\n")
+        self.assertIn("prefer edit_file", res)
+
+    def test_large_change_no_tip(self):
+        self._w("m.py", "a = 1\nb = 2\nc = 3\n")
+        res = self._write("m.py", "\n".join(f"line{i} = {i}" for i in range(20)) + "\n")
+        self.assertNotIn("prefer edit_file", res)
+
+    def test_new_file_no_tip(self):
+        res = self._write("fresh.py", "a = 1\n")
+        self.assertIn("Successfully wrote", res)
+        self.assertNotIn("prefer edit_file", res)
 
 
 if __name__ == "__main__":
