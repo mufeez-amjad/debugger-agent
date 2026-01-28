@@ -83,6 +83,55 @@ class TestAnchoredEdit(_Base):
         self.assertIn("anchor_line window", res)
 
 
+class TestSyntaxValidation(_Base):
+    def test_edit_that_breaks_parse_is_rejected(self):
+        self._w("m.py", "def f():\n    return 1\n")
+        res = self._edit("m.py", "    return 1", "    return (1")
+        self.assertIn("rejected", res)
+        self.assertIn("unparseable", res)
+        self.assertIn("File unchanged", res)
+        # file really unchanged
+        self.assertIn("return 1", self._r("m.py"))
+        self.assertNotIn("return (1", self._r("m.py"))
+
+    def test_write_that_breaks_parse_is_rejected(self):
+        self._w("m.py", "x = 1\n")
+        res = self._write("m.py", "x = (1\n")
+        self.assertIn("rejected", res)
+        self.assertIn("unparseable", res)
+        self.assertEqual(self._r("m.py"), "x = 1\n")
+
+    def test_valid_edit_not_rejected(self):
+        self._w("m.py", "x = 1\n")
+        res = self._edit("m.py", "x = 1", "x = 2")
+        self.assertIn("Successfully replaced", res)
+
+    def test_already_broken_file_can_be_repaired(self):
+        # A file that does NOT parse today must stay editable so the model can
+        # fix it.
+        self._w("broken.py", "def f(:\n    pass\n")
+        res = self._edit("broken.py", "def f(:", "def f():")
+        self.assertIn("Successfully replaced", res)
+        self.assertIn("def f():", self._r("broken.py"))
+
+    def test_non_py_never_validated(self):
+        self._w("data.txt", "anything")
+        res = self._write("data.txt", "((((not python")
+        self.assertIn("Successfully wrote", res)
+
+    def test_flag_disables_validation(self):
+        h = FileInterfaceHarness(self.tmp, validate_python_syntax=False)
+        self._w("m.py", "x = 1\n")
+        res = h._execute_edit_file(
+            ToolCall(
+                name="edit_file",
+                parameters={"file_path": "m.py", "old_string": "x = 1", "new_string": "x = (1"},
+                reasoning="",
+            )
+        )
+        self.assertIn("Successfully replaced", res)
+
+
 class TestSnapshotRevert(_Base):
     def test_revert_restores_snapshot(self):
         p = self._w("m.py", "x = 1\ny = 2\n")
