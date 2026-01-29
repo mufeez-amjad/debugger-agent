@@ -53,6 +53,27 @@ class _Base(unittest.TestCase):
         )
 
 
+class TestReadFileRemoved(_Base):
+    """There is no read_file capability; bash owns reads."""
+
+    def test_capability_methods_gone(self):
+        self.assertFalse(hasattr(self.h, "execute_read_file"))
+        self.assertFalse(hasattr(self.h, "_execute_read_file"))
+
+    def test_read_file_tool_call_is_unknown(self):
+        self._w("a.py", "one\ntwo\nthree\n")
+        out = self.h.execute_tool_call(
+            ToolCall(name="read_file", parameters={"file_path": "a.py"}, reasoning="")
+        )
+        self.assertIn("Unknown tool", out)
+
+    def test_read_file_absent_from_schema(self):
+        from common.models import TOOLS_DESCRIPTIONS, NON_DEBUGGING_TOOL_NAMES
+
+        self.assertNotIn("read_file", TOOLS_DESCRIPTIONS)
+        self.assertNotIn("read_file", NON_DEBUGGING_TOOL_NAMES)
+
+
 class TestAnchoredEdit(_Base):
     def test_anchor_restricts_to_window(self):
         # Two identical 'a=0' blocks separated by >40 filler lines. block1 is at
