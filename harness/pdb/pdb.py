@@ -2048,6 +2048,24 @@ class PdbHarness:
                 return f"{result}\n{context}"
         return result
 
+    def _execute_step_over(self, tool_call: ToolCall) -> str:
+        """Step over the current line using real PDB."""
+        return self._with_position_context(self.current_session.send_command("n"))
+
+    def _execute_step_into(self, tool_call: ToolCall) -> str:
+        """Step into function calls using real PDB.
+
+        Appends the same source window as step_over, so the two tools give
+        equal context."""
+        return self._with_position_context(self.current_session.send_command("s"))
+
+    def _execute_step_out(self, tool_call: ToolCall) -> str:
+        """Step out of the current function using real PDB."""
+        # Use PDB's 'r' (return) command to run until current function returns
+        return self._with_position_context(
+            self.current_session.send_command("r", timeout=30.0)
+        )
+
     @staticmethod
     def _pdb_reply_errored(reply: str) -> bool:
         """True when a pdb reply is an error/empty rather than a value — used
