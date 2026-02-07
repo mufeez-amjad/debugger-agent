@@ -2066,6 +2066,61 @@ class PdbHarness:
             self.current_session.send_command("r", timeout=30.0)
         )
 
+    def _execute_print_variable(self, tool_call: ToolCall) -> str:
+        """Print the value of a variable using real PDB."""
+        # Accept arg-name aliases. The model often emits {"variable_name": ...},
+        # a natural key. Rejecting it with "No variable name specified" causes
+        # repeated failed inspections and no progress.
+        p = tool_call.parameters
+        var_name = (
+            p.get('name')
+            or p.get('variable')
+            or p.get('variable_name')
+            or p.get('var_name')
+            or p.get('var')
+            or p.get('expression')
+        )
+        if not var_name:
+            return "Error: No variable name specified"
+
+        # Use PDB's 'p' command to print the variable
+        return self._augment_name_error(
+            self.current_session.send_command(f"p {var_name}")
+        )
+    
+    def _execute_examine_locals(self, tool_call: ToolCall) -> str:
+        """Examine local variables using real PDB.
+
+        Also dumps ``self.__dict__`` when ``self`` is in the locals frame.
+        Without it, the model calls ``examine_locals`` several times in a row
+        when the bug-relevant state lives on ``self`` as an instance
+        attribute, not in locals().
+        ``pp locals()`` would only show ``'self': <...obj at 0x...>`` and the
+        model had to follow up with ``run_expression`` or ``print_variable``
+        to see object state. Appending ``vars(self)`` automatically removes
+        that round-trip without changing the existing locals() format
+        (the new section follows a clear delimiter).
+        """
+        locals_output = self.current_session.send_command("pp locals()")
+        if self._pdb_reply_errored(locals_output):
+            return locals_output
+        # Labeled sections, not raw echoed pdb commands ("pp locals()" /
+        # "--- self.__dict__ ---" separators).
+        result = f"Local variables:\n{locals_output.strip()}"
+        # Cheap substring check on the pp-formatted locals output. PDB renders
+        # a self-reference as `'self': <ClassName object at 0x...>`. If absent
+        # (module-level or static-method frames), skip the second roundtrip.
+        if "'self':" in locals_output:
+            self_dict = self.current_session.send_command("pp vars(self)")
+            # vars() raises TypeError on slotted classes; suppress those.
+            if not any(err in self_dict for err in
+                       ("NameError", "AttributeError", "TypeError", "Traceback")):
+                result += (
+                    f"\n\nInstance attributes of self (vars(self)):\n"
+                    f"{self_dict.strip()}"
+                )
+        return result
+    
     @staticmethod
     def _pdb_reply_errored(reply: str) -> bool:
         """True when a pdb reply is an error/empty rather than a value — used
@@ -2078,6 +2133,11 @@ class PdbHarness:
             or "No active debugging session" in reply
         )
 
+    def _execute_examine_globals(self, tool_call: ToolCall) -> str:
+        """Examine global variables using real PDB."""
+        # Use PDB's 'pp globals()' command to print global variables  
+        return self.current_session.send_command("pp globals()")
+    
     # Shell programs that models try to run inside the debugger
     # (`pytest -xvs ...`, `import subprocess; ...pytest...`).
     # `(?!\s*\()` keeps genuine Python calls like `find(...)` matchable as
