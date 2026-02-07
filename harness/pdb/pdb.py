@@ -2402,6 +2402,55 @@ class PdbHarness:
         except Exception as e:
             return f"Error evaluating expression '{expression}': {str(e)}"
     
+    def _execute_list_code(self, tool_call: ToolCall) -> str:
+        """List code lines, labeled with the file they came from.
+
+        pdb's bare ``l start,end`` is frame-relative and unlabeled, so a model
+        that lists while stopped in the test file believes it is reading the
+        target module and loops. We prefix an unambiguous ``File:`` header. An
+        optional ``file`` argument reads the requested lines FRESH from disk
+        (which also fixes stale-linecache reads after an edit).
+        """
+        p = tool_call.parameters
+        start = p.get('start')
+        end = p.get('end')
+        file_arg = p.get('file') or p.get('file_path')
+
+        if file_arg:
+            return self._list_from_disk(file_arg, start, end)
+
+        # While the current frame is OUTSIDE the workspace (the pre-continue
+        # pytest/runpy bootstrap, or any interpreter-internal stop), a bare `l`
+        # lists Python internals, the same noise start() suppresses from its
+        # banner. The harness overwrites the session's "started" state at
+        # dispatch, so gate on the frame's file instead. It is authoritative
+        # regardless of state bookkeeping.
+        session = self.current_session
+        pos = (session.current_position or {}) if session else {}
+        frame_file = str(pos.get("file") or "")
+        wd = str(getattr(self, "working_directory", "") or "")
+        if frame_file and wd and not os.path.abspath(frame_file).startswith(
+            os.path.abspath(wd) + os.sep
+        ):
+            return (
+                "The current frame is inside Python's bootstrap/interpreter "
+                f"internals ({os.path.basename(frame_file)}), not scenario "
+                "code — a bare list_code here shows interpreter source. Pass "
+                "file='<name>' to read scenario source from disk, or set "
+                "breakpoints and call continue_execution to stop in real code "
+                "first."
+            )
+
+        # Build PDB 'l' (list) command for the current frame's file.
+        if start and end:
+            raw = self.current_session.send_command(f"l {start}, {end}")
+        elif start:
+            raw = self.current_session.send_command(f"l {start}")
+        else:
+            # List around current line (default behavior)
+            raw = self.current_session.send_command("l")
+        return self._label_list_output(raw, start, end)
+
     def _label_list_output(self, raw: str, start=None, end=None) -> str:
         """Prefix pdb's ``l`` output with a ``File: <abs path> (lines A-B)``
         header for the current frame's file."""
@@ -2452,6 +2501,95 @@ class PdbHarness:
         rows = [f"{i:>4}\t{lines[i - 1].rstrip()}" for i in range(s, e + 1)]
         return f"File: {path} (lines {s}-{e})\n" + "\n".join(rows)
     
+    def _execute_where_am_i(self, tool_call: ToolCall) -> str:
+        """Show current execution location using real PDB."""
+        # Use PDB's 'w' (where) command to show call stack and current location
+        return self.current_session.send_command("w")
+
+    def _execute_inspect_stack(self, tool_call: ToolCall) -> str:
+        """Show the call stack with local variables at each frame."""
+        max_frames = tool_call.parameters.get('max_frames')
+        try:
+            max_frames = int(max_frames) if max_frames is not None else None
+        except (ValueError, TypeError):
+            max_frames = None
+
+        # Internal frames to skip (not useful for debugging user code)
+        _INTERNAL_PATHS = ('bdb.py', 'pdb.py', '<string>')
+
+        def _is_internal(frame_line: str) -> bool:
+            return any(p in frame_line for p in _INTERNAL_PATHS)
+
+        # Get the current stack trace
+        stack_output = self.current_session.send_command("w")
+        if not stack_output:
+            return "Error: Could not retrieve stack"
+
+        # Count frame markers in the stack output
+        frame_markers = [l for l in stack_output.split('\n') if re.match(r'\s*>?\s*/.+\(\d+\)', l) or re.match(r'\s*>?\s*<.+>\(\d+\)', l)]
+        num_frames = max(len(frame_markers), 1)
+
+        # Move to oldest frame
+        for _ in range(num_frames + 5):
+            resp = self.current_session.send_command("u")
+            if "Oldest frame" in resp:
+                break
+
+        # Walk down collecting frame info + locals, skipping internal frames
+        sections = []
+        user_frame_idx = 0
+        for _ in range(num_frames + 5):
+            if max_frames and user_frame_idx >= max_frames:
+                break
+
+            # Get current frame info via 'w' and find the '>' marker
+            where = self.current_session.send_command("w")
+            current_frame = None
+            for line in where.split('\n'):
+                if line.strip().startswith('>'):
+                    current_frame = line.strip()
+                    break
+
+            if current_frame and not _is_internal(current_frame):
+                # Get locals using '!' to force Python eval (avoids PDB parse issues)
+                locals_output = self.current_session.send_command(
+                    "!{k: v for k, v in locals().items() if not k.startswith('__')}"
+                )
+                # Clean echoed command from output
+                cleaned_locals = '\n'.join(
+                    l for l in locals_output.split('\n')
+                    if not l.strip().startswith('!{') and not l.strip().startswith('{k:')
+                ).strip() or locals_output.strip()
+
+                sections.append(f"--- Frame {user_frame_idx} ---\n{current_frame}\nLocals: {cleaned_locals}")
+                user_frame_idx += 1
+
+            # Move down one frame
+            resp = self.current_session.send_command("d")
+            if "Newest frame" in resp:
+                # Capture this last frame if it's a user frame
+                if not current_frame or _is_internal(current_frame or ""):
+                    where = self.current_session.send_command("w")
+                    for line in where.split('\n'):
+                        if line.strip().startswith('>'):
+                            current_frame = line.strip()
+                            break
+                    if current_frame and not _is_internal(current_frame):
+                        locals_output = self.current_session.send_command(
+                            "!{k: v for k, v in locals().items() if not k.startswith('__')}"
+                        )
+                        cleaned_locals = '\n'.join(
+                            l for l in locals_output.split('\n')
+                            if not l.strip().startswith('!{') and not l.strip().startswith('{k:')
+                        ).strip() or locals_output.strip()
+                        sections.append(f"--- Frame {user_frame_idx} ---\n{current_frame}\nLocals: {cleaned_locals}")
+                break
+
+        if not sections:
+            return f"Stack trace:\n{stack_output}"
+
+        return "\n\n".join(sections)
+
     def _current_file_path(self) -> Optional[str]:
         if self.current_session:
             return self.current_session.existing_file_path
