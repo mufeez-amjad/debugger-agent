@@ -2256,6 +2256,57 @@ class PdbHarness:
         names = [t for t in matches[-1].split(",") if t.isidentifier()]
         return names[:cap]
 
+    def _execute_run_expression(self, tool_call: ToolCall) -> str:
+        """Run a Python expression in the current context using real PDB."""
+        expression = tool_call.parameters.get('expression')
+
+        if not expression:
+            return "Error: No expression specified"
+
+        if self._IMPORT_STATEMENT_RE.match(expression):
+            # An import STATEMENT can't be evaluated, but the model usually just
+            # wants a module-level value — point at the working alternatives so
+            # it stops retrying the blocked import.
+            return (
+                "Error: run_expression evaluates a Python EXPRESSION in the "
+                "current debugger frame — it cannot run an import statement. To "
+                "read a module value without importing, use "
+                "__import__('<module>').<Name>. To run tests/shell commands "
+                "(pytest, pip, ...), use the bash tool."
+            )
+
+        if self._SHELL_EXPRESSION_RE.match(expression):
+            return (
+                "Error: run_expression evaluates a Python EXPRESSION in the "
+                "current debugger frame — it cannot run shell commands; use the "
+                "bash tool for pytest, pip, ls, etc."
+            )
+
+        # `p` evaluates a single EXPRESSION, so a semicolon-joined compound
+        # ("self._trail.record(...); self._locks._labels") would be a raw
+        # SyntaxError. Execute the leading statements via pdb's `!`, then
+        # evaluate only the final segment as the value-producing expression.
+        segments = self._split_top_level_semicolons(expression)
+        setup_output = ""
+        if len(segments) > 1:
+            stmt = "; ".join(segments[:-1])
+            setup = self.current_session.send_command(f"!{stmt}", timeout=5.0)
+            setup_clean = (setup or "").strip()
+            if setup_clean and any(
+                marker in setup_clean
+                for marker in ("***", "Traceback", "SyntaxError", "Error")
+            ):
+                return (
+                    f"Error while executing statement(s) `{stmt}`:\n"
+                    f"{setup_clean}{self._current_position_note()}"
+                )
+            if setup_clean:
+                setup_output = f"{setup_clean}\n"
+            expression = segments[-1]
+
+        result = self._eval_single_expression(expression)
+        return f"{setup_output}{result}" if setup_output else result
+
     @staticmethod
     def _split_top_level_semicolons(text: str) -> List[str]:
         """Split ``text`` on semicolons that sit outside quotes and brackets.
