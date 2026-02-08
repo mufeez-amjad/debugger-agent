@@ -2656,6 +2656,50 @@ class PdbHarness:
             return self.current_session.existing_file_path
         return None
 
+    def _execute_run_program(self, tool_call: ToolCall) -> str:
+        """Run the current program outside of PDB and return its output."""
+        file_path = self._current_file_path()
+        if not file_path:
+            return "Error: No debugging session active. Use start_session first."
+        try:
+            result = subprocess.run(
+                [sys.executable, file_path],
+                capture_output=True,
+                text=True,
+                cwd=str(self.working_directory),
+                timeout=30,
+            )
+            output = result.stdout
+            if result.stderr:
+                output += f"\nSTDERR:\n{result.stderr}"
+            if result.returncode != 0:
+                output += f"\nExit code: {result.returncode}"
+            return output or "Program produced no output"
+        except subprocess.TimeoutExpired:
+            return "Program execution timed out (>30 seconds)"
+        except Exception as e:
+            return f"Error running program: {e}"
+
+    def _execute_propose_fix(self, tool_call: ToolCall) -> str:
+        """Apply a proposed code fix by overwriting the current file."""
+        code = tool_call.parameters.get('code')
+        if not code:
+            return "Error: No fixed code provided"
+        file_path = self._current_file_path()
+        if not file_path:
+            return "Error: No debugging session active. Use start_session first."
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(code)
+            return f"Proposed fix applied to {os.path.basename(file_path)}"
+        except Exception as e:
+            return f"Error applying fix: {e}"
+
+    def _execute_verify_output(self, tool_call: ToolCall) -> str:
+        """Re-run the program after a fix to verify its output."""
+        return self._execute_run_program(tool_call)
+    
+    
     def get_session_summary(self) -> Dict[str, Any]:
         """Get summary of current session state."""
         if not self.current_session:
