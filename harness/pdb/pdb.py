@@ -1592,6 +1592,52 @@ class PdbHarness:
         except Exception as e:
             return f"Error: Invalid breakpoints format: {str(e)}"
     
+    def _execute_remove_breakpoint(self, tool_call: ToolCall) -> str:
+        """Remove breakpoints using real PDB.
+
+        pdb's ``clear`` parses a BARE integer as a breakpoint SEQUENCE number,
+        not a source line. ``clear {line}`` would fail with "Breakpoint number
+        N out of range" while the harness reported success and pruned its
+        tracking (a desync). So this method clears by the tracked pdb
+        breakpoint number (falling back to ``clear file:line``) and prunes
+        tracking only on a confirmed "Deleted" response.
+        """
+        breakpoints_param = tool_call.parameters.get('breakpoints')
+        if not breakpoints_param:
+            return "Error: No breakpoints specified for removal"
+
+        try:
+            if isinstance(breakpoints_param, str):
+                import json
+                breakpoints = json.loads(breakpoints_param)
+            else:
+                breakpoints = breakpoints_param
+
+            if not breakpoints:
+                return "Error: No breakpoints specified for removal"
+
+            results = []
+            for bp in breakpoints:
+                if not isinstance(bp, dict):
+                    results.append(f"Error: Invalid breakpoint format: {bp}")
+                    continue
+                file_name = bp.get('file', self.current_session.filename)
+                lines = bp.get('lines', [])
+                if isinstance(lines, int):
+                    lines = [lines]
+                for line_num in lines:
+                    try:
+                        line_num = int(line_num)
+                    except (ValueError, TypeError):
+                        results.append(f"Error: Invalid line number '{line_num}'")
+                        continue
+                    results.append(self._remove_one_breakpoint(file_name, line_num))
+
+            return "\n".join(results)
+
+        except Exception as e:
+            return f"Error: Invalid breakpoints format: {str(e)}"
+
     def _remove_one_breakpoint(self, file_name: str, line_num: int) -> str:
         """Clear a single tracked breakpoint honestly (see _execute_remove_breakpoint)."""
         session = self.current_session
@@ -1659,6 +1705,21 @@ class PdbHarness:
             f"(PDB: {resp or 'no matching breakpoint'})"
         )
     
+    def _execute_clear_breakpoints(self, tool_call: ToolCall) -> str:
+        """Clear all breakpoints using real PDB."""
+        # Send 'clear' command — PDB may prompt "Clear all breaks? [y/n]"
+        response = self.current_session.send_command("clear")
+
+        # If PDB is prompting for confirmation, send 'y'
+        if "Clear all breaks?" in response or "clear all breaks?" in response.lower():
+            response = self.current_session.send_command("y")
+
+        # Clear our tracking
+        self.current_session.breakpoints.clear()
+        self.current_session.breakpoint_numbers.clear()
+
+        return response if response.strip() else "All breakpoints cleared"
+
     def _resolve_breakpoint_file(self, file_name: str) -> Optional[str]:
         """Best-effort resolve a breakpoint file reference to an absolute path."""
         if not file_name:
