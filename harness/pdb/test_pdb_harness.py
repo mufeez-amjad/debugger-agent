@@ -474,3 +474,154 @@ print(result)
         self.assertIsInstance(result, str)
         self.assertNotIn("Error:", result)
         self.assertIn("Frame", result)
+
+
+class TestCrossFileBreakpoints(unittest.TestCase):
+    """Tests for breakpoints set in a different file than the debugged file."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.harness = PdbHarness(working_directory=self._tmpdir.name)
+
+    def tearDown(self):
+        asyncio.run(self.harness.cleanup_async())
+        self._tmpdir.cleanup()
+
+    def _tool(self, name, parameters=None):
+        return ToolCall(name, parameters=parameters or {}, reasoning="test")
+
+    def test_breakpoint_in_imported_file_is_hit(self):
+        """Setting a breakpoint in an imported module via a pytest test file should
+        stop inside that module (exercises the pytest --trace path)."""
+        import os
+
+        # Write the library file
+        lib_code = """\
+def add_tag(tag, tags=None):
+    if tags is None:
+        tags = []
+    tags.append(tag)
+    return tags
+"""
+        lib_path = os.path.join(self._tmpdir.name, "tags.py")
+        with open(lib_path, "w") as f:
+            f.write(lib_code)
+
+        # Write a proper pytest test file (test_ prefix triggers pytest --trace)
+        test_code = """\
+from tags import add_tag
+
+def test_add_tag():
+    result = add_tag("x")
+    assert result == ["x"]
+"""
+        test_path = os.path.join(self._tmpdir.name, "test_tags.py")
+        with open(test_path, "w") as f:
+            f.write(test_code)
+
+        # Start debugger on the test file
+        result = self.harness.execute_tool_call(self._tool(
+            "start_debugger", {"file_path": "test_tags.py"}
+        ))
+        self.assertIn("Debugging session started", result)
+
+        # Set breakpoint in tags.py (a different file) at line 4 (tags.append)
+        result = self.harness.execute_tool_call(self._tool(
+            "add_breakpoint",
+            {"breakpoints": [{"file": "tags.py", "lines": [4]}]}
+        ))
+        self.assertIn("Breakpoint set", result)
+
+        # Continue — should hit the breakpoint inside tags.py
+        result = self.harness.execute_tool_call(self._tool("continue_execution"))
+        self.assertNotIn("Program finished without hitting", result,
+                         f"Breakpoint was not hit: {result}")
+
+        # Examine locals — we should see 'tag' and 'tags' from add_tag's frame
+        locals_result = self.harness.execute_tool_call(self._tool("examine_locals"))
+        self.assertIn("tag", locals_result, f"Expected 'tag' in locals but got: {locals_result}")
+
+    def test_breakpoint_same_file_no_qualifier(self):
+        """Breakpoints in the session file should use bare line numbers (no file: prefix)."""
+        code = """\
+x = 1
+y = 2
+z = x + y
+print(z)
+"""
+        self.harness.start_session(code, "simple.py")
+        self.harness.execute_tool_call(self._tool("start_debugger"))
+
+        # Set breakpoint in same file using the complex format
+        result = self.harness.execute_tool_call(self._tool(
+            "add_breakpoint",
+            {"breakpoints": [{"file": "simple.py", "lines": [3]}]}
+        ))
+        self.assertIn("Breakpoint set", result)
+
+        # Continue to breakpoint
+        result = self.harness.execute_tool_call(self._tool("continue_execution"))
+
+        # Check locals — x and y should be visible
+        locals_result = self.harness.execute_tool_call(self._tool("examine_locals"))
+        self.assertIn("x", locals_result)
+
+    def test_examine_locals_dumps_self_dict(self):
+        """When self is in the current frame, examine_locals should also dump self.__dict__.
+
+        Without this, the model wastes debugger steps because pp locals() only shows `'self': <obj at 0x...>`
+        and the bug-relevant state lives on self's instance attributes.
+        """
+        code = """\
+class Counter:
+    def __init__(self, start):
+        self._n = start
+        self._history = []
+
+    def bump(self):
+        marker = "before-bump"
+        self._history.append(self._n)
+        self._n += 1
+        return self._n
+
+c = Counter(10)
+c.bump()
+"""
+        self.harness.start_session(code, "counter.py")
+        self.harness.execute_tool_call(self._tool("start_debugger"))
+        # Break inside bump() so `self` and a local (`marker`) are both in scope.
+        self.harness.execute_tool_call(self._tool(
+            "add_breakpoint",
+            {"breakpoints": [{"file": "counter.py", "lines": [8]}]}
+        ))
+        self.harness.execute_tool_call(self._tool("continue_execution"))
+
+        result = self.harness.execute_tool_call(self._tool("examine_locals"))
+        # Locals are visible (marker, self).
+        self.assertIn("marker", result, f"Expected local 'marker' in output: {result}")
+        # Labeled sections, not raw pdb separators.
+        self.assertIn("Local variables:", result,
+                      f"Expected 'Local variables:' section in output: {result}")
+        self.assertIn("Instance attributes of self (vars(self)):", result,
+                      f"Expected vars(self) section in output: {result}")
+        self.assertIn("_n", result, f"Expected attribute '_n' in output: {result}")
+        self.assertIn("_history", result, f"Expected attribute '_history' in output: {result}")
+
+    def test_examine_locals_no_self_section_when_no_self(self):
+        """At module-level frames (no self), examine_locals should not append the section."""
+        code = """\
+a = 1
+b = 2
+c = a + b
+"""
+        self.harness.start_session(code, "noself.py")
+        self.harness.execute_tool_call(self._tool("start_debugger"))
+        self.harness.execute_tool_call(self._tool(
+            "add_breakpoint",
+            {"breakpoints": [{"file": "noself.py", "lines": [3]}]}
+        ))
+        self.harness.execute_tool_call(self._tool("continue_execution"))
+
+        result = self.harness.execute_tool_call(self._tool("examine_locals"))
+        self.assertNotIn("Instance attributes of self", result,
+                         f"Did not expect vars(self) section: {result}")
