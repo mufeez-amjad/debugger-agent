@@ -625,3 +625,102 @@ c = a + b
         result = self.harness.execute_tool_call(self._tool("examine_locals"))
         self.assertNotIn("Instance attributes of self", result,
                          f"Did not expect vars(self) section: {result}")
+
+
+class TestMissedBreakpointRecovery(unittest.TestCase):
+    """Scope-warning on import-time breakpoints, and keeping
+    the session alive (with an actionable diagnostic) when `continue` runs the
+    program to completion without hitting a breakpoint."""
+
+    LIB = (
+        "class Counter:\n"
+        "    _shared = []\n"            # line 2: class-body, runs at import
+        "    def __init__(self):\n"
+        "        self.values = {}\n"     # line 4: inside __init__
+        "    def bump(self, k):\n"
+        "        self.values[k] = self.values.get(k, 0) + 1\n"
+        "        return self.values[k]\n"
+        "    def never_called(self):\n"  # line 8: def header
+        "        return 42\n"            # line 9: in-function, but never called
+    )
+    TEST = (
+        "from counter import Counter\n"
+        "def test_bump():\n"
+        "    c = Counter()\n"
+        "    assert c.bump('a') == 1\n"
+    )
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        import os
+        with open(os.path.join(self._tmpdir.name, "counter.py"), "w") as fh:
+            fh.write(self.LIB)
+        with open(os.path.join(self._tmpdir.name, "test_counter.py"), "w") as fh:
+            fh.write(self.TEST)
+        self.harness = PdbHarness(working_directory=self._tmpdir.name)
+
+    def tearDown(self):
+        asyncio.run(self.harness.cleanup_async())
+        self._tmpdir.cleanup()
+
+    def _tool(self, name, parameters=None):
+        return ToolCall(name, parameters=parameters or {}, reasoning="t")
+
+    def test_class_body_breakpoint_rejected(self):
+        # A breakpoint on the class-body line 2 (runs once at import, never
+        # hit) is REJECTED outright. The harness does not move it to another
+        # line, because the model would lean on that instead of reading the
+        # code. No breakpoint is set and no replacement line is suggested.
+        self.harness.execute_tool_call(self._tool("start_debugger", {"file_path": "test_counter.py"}))
+        result = self.harness.execute_tool_call(
+            self._tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [2]}]})
+        )
+        self.assertIn("not an executable statement inside a function", result)
+        self.assertIn("No breakpoint was set", result)
+        self.assertNotIn("Breakpoint set", result)
+        self.assertEqual(self.harness.current_session.breakpoints, [])
+
+    def test_executable_line_breakpoint_actually_hit(self):
+        # A breakpoint on a real in-function line fires instead of the program
+        # running to completion.
+        self.harness.execute_tool_call(self._tool("start_debugger", {"file_path": "test_counter.py"}))
+        self.harness.execute_tool_call(
+            self._tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [4]}]})
+        )
+        result = self.harness.execute_tool_call(self._tool("continue_execution"))
+        self.assertNotIn("WITHOUT stopping", result)
+        self.assertTrue(self.harness.current_session.is_alive())
+        self.assertEqual(self.harness.current_session.current_position["line"], 4)
+
+    def test_inside_function_breakpoint_has_no_warning(self):
+        self.harness.execute_tool_call(self._tool("start_debugger", {"file_path": "test_counter.py"}))
+        result = self.harness.execute_tool_call(
+            self._tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [4]}]})
+        )
+        self.assertIn("Breakpoint set", result)
+        self.assertNotIn("adjusted from", result)
+        self.assertNotIn("WARNING", result)
+
+    def test_continue_past_missed_breakpoint_recovers_and_stays_alive(self):
+        # Line 9 is inside never_called() — executable, so it is NOT adjusted,
+        # but the test never calls it, so the program still runs to completion.
+        # The recovery path must still produce an actionable diagnostic.
+        self.harness.execute_tool_call(self._tool("start_debugger", {"file_path": "test_counter.py"}))
+        self.harness.execute_tool_call(
+            self._tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [9]}]})
+        )
+        result = self.harness.execute_tool_call(self._tool("continue_execution"))
+        # Actionable diagnostic instead of a silent dead session.
+        self.assertIn("WITHOUT stopping at your breakpoint", result)
+        # Session was restarted and remains usable.
+        self.assertTrue(self.harness.current_session.is_alive())
+
+    def test_good_breakpoint_stops_and_keeps_session_live(self):
+        self.harness.execute_tool_call(self._tool("start_debugger", {"file_path": "test_counter.py"}))
+        self.harness.execute_tool_call(
+            self._tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [4]}]})
+        )
+        result = self.harness.execute_tool_call(self._tool("continue_execution"))
+        self.assertNotIn("WITHOUT stopping", result)
+        self.assertTrue(self.harness.current_session.is_alive())
+        self.assertEqual(self.harness.current_session.current_position["line"], 4)
