@@ -132,5 +132,87 @@ class TargetArgsTest(unittest.TestCase):
         )
 
 
+class TargetingSessionTest(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.dir = self._tmpdir.name
+        for name, body in (("shared.py", SHARED_LIB), ("multi_test.py", MULTI_TEST)):
+            with open(os.path.join(self.dir, name), "w", encoding="utf-8") as fh:
+                fh.write(body)
+        self.harness = PdbHarness(working_directory=self.dir)
+
+    def tearDown(self):
+        asyncio.run(self.harness.cleanup_async())
+        self._tmpdir.cleanup()
+
+    def _start(self, **params):
+        params.setdefault("file_path", "multi_test.py")
+        return self.harness.execute_tool_call(_tool("start_debugger", params))
+
+    def _break_and_run(self):
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "shared.py", "lines": [2]}]})
+        )
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        return self.harness.execute_tool_call(_tool("print_variable", {"name": "tag"}))
+
+    def test_without_targeting_the_first_test_wins(self):
+        """The trap: the model lands in test_alpha, three tests early."""
+        self._start()
+        self.assertIn("alpha", self._break_and_run())
+
+    def test_targeting_lands_in_the_requested_test(self):
+        self._start(test="test_the_failing_one")
+        self.assertIn("omega", self._break_and_run())
+
+    def test_a_dash_k_expression_also_targets(self):
+        self._start(test="failing")
+        self.assertIn("omega", self._break_and_run())
+
+    def test_start_message_names_the_selection(self):
+        out = self._start(test="test_the_failing_one")
+        self.assertIn("running only `test_the_failing_one`", out)
+
+    def test_start_message_warns_when_nothing_is_selected(self):
+        """Teaches the parameter at the moment it would have helped."""
+        out = self._start()
+        self.assertIn("running all 4 tests", out)
+        self.assertIn('test="<test_name>"', out)
+        self.assertIn("FIRST test that reaches it", out)
+
+    def test_a_missing_test_fails_fast_and_names_the_real_ones(self):
+        out = self._start(test="test_does_not_exist")
+        self.assertTrue(out.lstrip().startswith("Error"), out)
+        self.assertIn("test_does_not_exist", out)
+        # The model cannot guess the names; give them rather than make it look.
+        self.assertIn("test_alpha", out)
+        self.assertIn("test_the_failing_one", out)
+
+    def test_an_exact_name_uses_a_node_id_not_a_substring(self):
+        """`test_alpha` must not also drag in `test_alpha_two`."""
+        with open(os.path.join(self.dir, "multi_test.py"), "a", encoding="utf-8") as fh:
+            fh.write("\n\ndef test_alpha_two():\n    assert touch('a2') == 'a2'\n")
+        self.harness.execute_tool_call(_tool("start_debugger", {
+            "file_path": "multi_test.py", "test": "test_alpha"}))
+        self.assertEqual(self.harness.current_session._selection_mode, "node")
+        self.assertIn("alpha", self._break_and_run())
+
+    def test_changing_the_selection_restarts_rather_than_no_ops(self):
+        """Same file, new selection: restarting in place would keep the previous run."""
+        self._start(test="test_alpha")
+        self.assertIn("alpha", self._break_and_run())
+        self._start(test="test_the_failing_one")
+        self.assertIn("omega", self._break_and_run())
+
+    def test_repeating_the_same_selection_still_restarts_in_place(self):
+        self._start(test="test_the_failing_one")
+        again = self._start(test="test_the_failing_one")
+        self.assertIn("restarted", again.lower())
+
+    def test_non_string_selection_is_rejected(self):
+        out = self._start(test=["test_alpha"])
+        self.assertTrue(out.lstrip().startswith("Error"), out)
+
+
 if __name__ == "__main__":
     unittest.main()
