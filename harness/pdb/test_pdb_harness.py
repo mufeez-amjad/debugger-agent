@@ -724,3 +724,156 @@ class TestMissedBreakpointRecovery(unittest.TestCase):
         self.assertNotIn("WITHOUT stopping", result)
         self.assertTrue(self.harness.current_session.is_alive())
         self.assertEqual(self.harness.current_session.current_position["line"], 4)
+
+
+class TestObservationImprovements(unittest.TestCase):
+    """start_debugger restart semantics, step_over source context,
+    add_breakpoint line echo, run_expression shell rejection, and NameError
+    explainers."""
+
+    SIMPLE_FUNC_PROGRAM = """def add(a, b):
+    total = a + b
+    return total
+
+print(add(2, 3))
+"""
+
+    MODULE_LEVEL_PROGRAM = """x = 41
+y = x + 1
+z = y + 1
+w = z + 1
+print(w)
+"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.harness = PdbHarness(working_directory=self._tmpdir.name)
+
+    def tearDown(self):
+        asyncio.run(self.harness.cleanup_async())
+        self._tmpdir.cleanup()
+
+    def _tool(self, name, parameters=None):
+        return ToolCall(name, parameters=parameters or {}, reasoning="test")
+
+    # ---- start_debugger restart semantics ----
+
+    def test_start_debugger_restarts_active_session(self):
+        self.harness.start_session(self.SIMPLE_FUNC_PROGRAM, "prog.py")
+        self.assertTrue(self.harness.current_session.is_alive())
+        result = self.harness.execute_tool_call(
+            self._tool("start_debugger", {"file_path": "prog.py"})
+        )
+        self.assertIn("restarted", result.lower())
+        self.assertNotIn("already running", result.lower())
+        self.assertTrue(self.harness.current_session.is_alive())
+
+    def test_start_debugger_restart_reapplies_breakpoints(self):
+        self.harness.start_session(self.SIMPLE_FUNC_PROGRAM, "prog.py")
+        self.harness.execute_tool_call(self._tool("add_breakpoint", {"line": 2}))
+        result = self.harness.execute_tool_call(
+            self._tool("start_debugger", {"file_path": "prog.py"})
+        )
+        self.assertIn("Re-applied breakpoints", result)
+        self.assertIn("prog.py:2", result)
+        self.assertIn(("prog.py", 2), self.harness.current_session.breakpoints)
+
+    def test_start_debugger_switches_to_new_file(self):
+        self.harness.start_session(self.SIMPLE_FUNC_PROGRAM, "prog.py")
+        other = Path(self._tmpdir.name) / "other.py"
+        other.write_text(self.MODULE_LEVEL_PROGRAM, encoding="utf-8")
+        result = self.harness.execute_tool_call(
+            self._tool("start_debugger", {"file_path": "other.py"})
+        )
+        self.assertIn("other.py", result)
+        self.assertEqual(self.harness.current_session.filename, "other.py")
+        self.assertTrue(self.harness.current_session.is_alive())
+
+    # ---- step_over source context ----
+
+    def test_step_over_shows_source_context(self):
+        self.harness.start_session(self.MODULE_LEVEL_PROGRAM, "ctx.py")
+        result = self.harness.execute_tool_call(self._tool("step_over"))
+        self.assertIn("Code context (ctx.py):", result)
+        # Cursor on the new current line, neighbours above and below.
+        self.assertIn("-> ", result)
+        self.assertIn("x = 41", result)
+        self.assertIn("y = x + 1", result)
+        self.assertIn("z = y + 1", result)
+
+    def test_step_over_after_completion_has_no_context(self):
+        self.harness.start_session("print('hi')\n", "tiny.py")
+        # Step until the program reports completion; the completion message
+        # carries no live position, so no context window may be attached.
+        result = ""
+        for _ in range(6):
+            result = self.harness.execute_tool_call(self._tool("step_over"))
+            if "completed" in result.lower() or "restart" in result.lower():
+                break
+        self.assertNotIn("Code context", result)
+
+    # ---- add_breakpoint line echo ----
+
+    def test_add_breakpoint_echoes_source_line_simple_form(self):
+        self.harness.start_session(self.SIMPLE_FUNC_PROGRAM, "prog.py")
+        result = self.harness.execute_tool_call(self._tool("add_breakpoint", {"line": 2}))
+        self.assertIn("Breakpoint set at line 2", result)
+        self.assertIn("total = a + b", result)
+
+    def test_add_breakpoint_echoes_source_line_batch_form(self):
+        self.harness.start_session(self.SIMPLE_FUNC_PROGRAM, "prog.py")
+        result = self.harness.execute_tool_call(
+            self._tool(
+                "add_breakpoint",
+                {"breakpoints": [{"file": "prog.py", "lines": [2]}]},
+            )
+        )
+        self.assertIn("Line 2: Breakpoint set", result)
+        self.assertIn("total = a + b", result)
+
+    # ---- run_expression shell-command rejection ----
+
+    def test_run_expression_rejects_shell_command(self):
+        self.harness.start_session(self.MODULE_LEVEL_PROGRAM, "prog.py")
+        result = self.harness.execute_tool_call(
+            self._tool("run_expression", {"expression": "pytest -xvs defect_test.py"})
+        )
+        self.assertIn("use the bash tool", result)
+        self.assertNotIn("SyntaxError", result)
+
+    def test_run_expression_rejects_import_statement(self):
+        self.harness.start_session(self.MODULE_LEVEL_PROGRAM, "prog.py")
+        result = self.harness.execute_tool_call(
+            self._tool(
+                "run_expression",
+                {"expression": "import subprocess; subprocess.run(['pytest'])"},
+            )
+        )
+        self.assertIn("use the bash tool", result)
+
+    def test_run_expression_still_evaluates_python(self):
+        self.harness.start_session(self.MODULE_LEVEL_PROGRAM, "prog.py")
+        result = self.harness.execute_tool_call(
+            self._tool("run_expression", {"expression": "1 + 1"})
+        )
+        self.assertIn("2", result)
+
+    # ---- NameError explainers ----
+
+    def test_print_variable_self_outside_method_explains_frame(self):
+        self.harness.start_session(self.MODULE_LEVEL_PROGRAM, "prog.py")
+        result = self.harness.execute_tool_call(
+            self._tool("print_variable", {"name": "self.x"})
+        )
+        self.assertIn("NameError", result)
+        self.assertIn("not stopped inside a method", result)
+
+    def test_run_expression_pending_line_name_error_explains(self):
+        self.harness.start_session(self.MODULE_LEVEL_PROGRAM, "prog.py")
+        # pdb is stopped BEFORE line 1 (`x = 41`) executes, so `x` is unbound
+        # and it appears on the current line — the explainer must fire.
+        result = self.harness.execute_tool_call(
+            self._tool("run_expression", {"expression": "x"})
+        )
+        self.assertIn("NameError", result)
+        self.assertIn("pdb stops BEFORE executing the displayed line", result)
