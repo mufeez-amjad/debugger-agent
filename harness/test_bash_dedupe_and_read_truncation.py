@@ -90,6 +90,66 @@ def test_pytest_style_rerun_keeps_summary_tail():
 # 2. head-first truncation for pure file reads
 # --------------------------------------------------------------------------- #
 
+def test_file_read_target_detection():
+    assert _file_read_target("cat foo.py") == ("foo.py", 1)
+    assert _file_read_target("sed -n '1,150p' foo.py") == ("foo.py", 1)
+    assert _file_read_target("sed -n '30,200p' pkg/mod.py") == ("pkg/mod.py", 30)
+    assert _file_read_target("tail -n +71 foo.py") == ("foo.py", 71)
+    assert _file_read_target("cat foo.py | grep x") is None
+    assert _file_read_target("python -m pytest foo_test.py") is None
+    assert _file_read_target("sed -i 's/a/b/' foo.py") is None
+
+
+def test_file_read_truncates_head_first_with_continue_hint():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d).resolve()
+        (root / "big.py").write_text(
+            "\n".join(f"line_{i}" for i in range(1, 301)) + "\n"
+        )
+        s = BashSession(root, timeout=5, max_output_lines=100)
+        try:
+            out = s.execute("cat big.py")
+            assert "<TOOL_OUTPUT_TRUNCATED:" in out
+            assert "trailing lines omitted" in out
+            assert "middle lines omitted" not in out
+            # contiguous head: line_1 .. line_100 all present, line_150 absent
+            assert "line_1\n" in out
+            assert "line_100" in out
+            assert "line_150" not in out
+            # continue-from-here hint names the file and the next range
+            assert "sed -n '101,200p' big.py" in out
+            assert "Exit code: 0" in out
+        finally:
+            s.close()
+
+
+def test_range_read_hint_uses_file_line_numbers():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d).resolve()
+        (root / "big.py").write_text(
+            "\n".join(f"line_{i}" for i in range(1, 401)) + "\n"
+        )
+        s = BashSession(root, timeout=5, max_output_lines=100)
+        try:
+            out = s.execute("sed -n '30,250p' big.py")
+            assert "trailing lines omitted" in out
+            # 100 output lines starting at file line 30 → next chunk starts at 130
+            assert "sed -n '130,229p' big.py" in out
+        finally:
+            s.close()
+
+
+def test_pytest_output_still_uses_middle_omission():
+    with tempfile.TemporaryDirectory() as d:
+        s = BashSession(Path(d).resolve(), timeout=5, max_output_lines=100)
+        try:
+            out = s.execute("seq 1 300")
+            assert "middle lines omitted" in out
+            assert "trailing lines omitted" not in out
+        finally:
+            s.close()
+
+
 # --------------------------------------------------------------------------- #
 # 3. failed-undo redirect to revert_file
 # --------------------------------------------------------------------------- #
