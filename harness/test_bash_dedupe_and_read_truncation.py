@@ -158,3 +158,29 @@ def _bash(session: DebugSession, command: str) -> str:
     return session.execute_tool_call(
         ToolCall(name="bash", parameters={"command": command}, reasoning="t")
     )
+
+
+def test_git_in_gitless_workspace_points_at_revert_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session = DebugSession(tmpdir)
+        out = _bash(session, "git checkout -- foo.py")
+        assert "not a git repository" in out
+        assert "revert_file" in out
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="the hint matches GNU cp wording")
+def test_cp_of_missing_backup_points_at_revert_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session = DebugSession(tmpdir)
+        out = _bash(session, "cp foo.py.bak foo.py")
+        assert "cannot stat" in out
+        assert "revert_file" in out
+
+
+def test_ordinary_failures_get_no_hint():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session = DebugSession(tmpdir)
+        out = _bash(session, "cp missing_source.py dest.py")
+        assert "revert_file" not in out
+        out2 = _bash(session, "echo fine")
+        assert "revert_file" not in out2
