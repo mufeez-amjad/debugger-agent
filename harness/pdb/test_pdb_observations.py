@@ -198,6 +198,47 @@ class TestContinuePositionContext(_AccumSessionCase):
 # examine_locals labeled sections
 # --------------------------------------------------------------------------
 
+class TestExamineLocalsSections(_AccumSessionCase):
+    def test_sections_present_when_self_in_scope(self):
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "accum.py", "lines": [8]}]})
+        )
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        result = self.harness.execute_tool_call(_tool("examine_locals"))
+        self.assertIn("Local variables:", result)
+        self.assertIn("marker", result)
+        self.assertIn("Instance attributes of self (vars(self)):", result)
+        self.assertIn("_history", result)
+        # No raw pdb separator appears.
+        self.assertNotIn("--- self.__dict__ ---", result)
+
+    def test_no_self_section_at_module_level_frame(self):
+        # The pytest runner's frame at session start has no `self`.
+        result = self.harness.execute_tool_call(_tool("examine_locals"))
+        self.assertNotIn("Instance attributes of self", result)
+
+
+class TestPdbReplyErrored(unittest.TestCase):
+    """Unit tests for the error-passthrough helper: errors are returned raw
+    (never wrapped in a 'Local variables:' section header)."""
+
+    def test_pdb_star_error_is_error(self):
+        self.assertTrue(PdbHarness._pdb_reply_errored("*** NameError: name 'q'"))
+
+    def test_harness_error_is_error(self):
+        self.assertTrue(PdbHarness._pdb_reply_errored("Error: no session"))
+
+    def test_no_session_is_error(self):
+        self.assertTrue(PdbHarness._pdb_reply_errored("No active debugging session"))
+
+    def test_empty_is_error(self):
+        self.assertTrue(PdbHarness._pdb_reply_errored(""))
+        self.assertTrue(PdbHarness._pdb_reply_errored("   \n"))
+
+    def test_value_output_is_not_error(self):
+        self.assertFalse(PdbHarness._pdb_reply_errored("{'x': 1, 'self': <A object>}"))
+
+
 # --------------------------------------------------------------------------
 # run_expression semicolon compounds
 # --------------------------------------------------------------------------
