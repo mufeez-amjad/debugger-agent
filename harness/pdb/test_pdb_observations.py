@@ -144,9 +144,55 @@ class TestEchoFreeSession(_AccumSessionCase):
 # add_breakpoint failure source windows
 # --------------------------------------------------------------------------
 
+class TestAddBreakpointFailureContext(_AccumSessionCase):
+    def test_non_executable_line_error_has_marked_context(self):
+        # Line 5 of accum.py is blank — not an executable statement.
+        result = self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "accum.py", "lines": [5]}]})
+        )
+        self.assertIn("Error", result)
+        # The marker string stays verbatim.
+        self.assertIn("not an executable statement inside a function", result)
+        # Source window with the rejected line marked `! `.
+        self.assertIn("Code context (accum.py):", result)
+        self.assertIn("!     5", result)
+        self.assertIn("def add(self, value):", result)
+
+    def test_past_eof_error_has_file_tail_context(self):
+        result = self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "accum.py", "lines": [999]}]})
+        )
+        self.assertIn("beyond end of file", result)
+        self.assertIn("No breakpoint was set", result)
+        # The tail of the file is shown so the model sees what IS there.
+        self.assertIn("Code context (accum.py):", result)
+        self.assertIn("return self._total", result)
+
+
 # --------------------------------------------------------------------------
 # continue_execution position context
 # --------------------------------------------------------------------------
+
+class TestContinuePositionContext(_AccumSessionCase):
+    def test_continue_to_breakpoint_appends_code_context(self):
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "accum.py", "lines": [9]}]})
+        )
+        result = self.harness.execute_tool_call(_tool("continue_execution"))
+        # Stopped at a live position -> same source window step_over shows.
+        self.assertIn("Code context (accum.py):", result)
+        self.assertIn("->", result)
+        self.assertIn("self._total += value", result)
+
+    def test_step_over_and_continue_share_window_format(self):
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "accum.py", "lines": [8]}]})
+        )
+        cont = self.harness.execute_tool_call(_tool("continue_execution"))
+        step = self.harness.execute_tool_call(_tool("step_over"))
+        self.assertIn("Code context (accum.py):", cont)
+        self.assertIn("Code context (accum.py):", step)
+
 
 # --------------------------------------------------------------------------
 # examine_locals labeled sections
