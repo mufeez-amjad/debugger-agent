@@ -243,5 +243,91 @@ class TestPdbReplyErrored(unittest.TestCase):
 # run_expression semicolon compounds
 # --------------------------------------------------------------------------
 
+class TestSplitTopLevelSemicolons(unittest.TestCase):
+    def test_simple_compound_splits(self):
+        self.assertEqual(
+            PdbHarness._split_top_level_semicolons("x = 1; x + 1"),
+            ["x = 1", "x + 1"],
+        )
+
+    def test_quoted_semicolon_not_split(self):
+        self.assertEqual(
+            PdbHarness._split_top_level_semicolons('s = "a;b"; s'),
+            ['s = "a;b"', "s"],
+        )
+
+    def test_single_quoted_semicolon_not_split(self):
+        self.assertEqual(
+            PdbHarness._split_top_level_semicolons("s = 'a;b'"),
+            ["s = 'a;b'"],
+        )
+
+    def test_bracketed_semicolon_not_split(self):
+        self.assertEqual(
+            PdbHarness._split_top_level_semicolons("f('x;y'); g([1, 2])"),
+            ["f('x;y')", "g([1, 2])"],
+        )
+
+    def test_escaped_quote_inside_string(self):
+        self.assertEqual(
+            PdbHarness._split_top_level_semicolons("s = 'a\\';b'; s"),
+            ["s = 'a\\';b'", "s"],
+        )
+
+    def test_no_semicolon_is_single_segment(self):
+        self.assertEqual(
+            PdbHarness._split_top_level_semicolons("value + 1"),
+            ["value + 1"],
+        )
+
+    def test_empty_segments_dropped(self):
+        self.assertEqual(
+            PdbHarness._split_top_level_semicolons("x = 1;; x ;"),
+            ["x = 1", "x"],
+        )
+
+
+class TestRunExpressionCompound(_AccumSessionCase):
+    def _stop_in_add(self):
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "accum.py", "lines": [9]}]})
+        )
+        self.harness.execute_tool_call(_tool("continue_execution"))
+
+    def _run(self, expression):
+        return self.harness.execute_tool_call(
+            _tool("run_expression", {"expression": expression})
+        )
+
+    def test_setup_statement_then_expression(self):
+        self._stop_in_add()
+        result = self._run("tmp_probe = 40; tmp_probe + 2")
+        self.assertIn("42", result)
+        self.assertNotIn("SyntaxError", result)
+
+    def test_setup_output_prepended(self):
+        self._stop_in_add()
+        result = self._run("print('setup-mark'); 1 + 1")
+        self.assertIn("setup-mark", result)
+        self.assertIn("2", result)
+
+    def test_quoted_semicolon_expression_not_split(self):
+        self._stop_in_add()
+        result = self._run("'a;b'")
+        self.assertIn("a;b", result)
+        self.assertNotIn("SyntaxError", result)
+
+    def test_setup_error_reported_with_statement(self):
+        self._stop_in_add()
+        result = self._run("zz_undefined_xyz += 1; value")
+        self.assertIn("Error while executing statement(s)", result)
+        self.assertIn("zz_undefined_xyz", result)
+
+    def test_single_expression_unchanged(self):
+        self._stop_in_add()
+        result = self._run("value * 10")
+        self.assertIn("20", result)  # first add(2) hits the bp with value=2
+
+
 if __name__ == "__main__":
     unittest.main()
