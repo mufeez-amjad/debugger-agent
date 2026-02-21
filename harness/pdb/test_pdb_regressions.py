@@ -355,9 +355,69 @@ class TestListCodeAndCrossFile(_HarnessCase):
 # run_expression hints / available names / always render
 # --------------------------------------------------------------------------
 
+class TestRunExpression(_HarnessCase):
+    SIMPLE = "def add(a, b):\n    total = a + b\n    return total\nprint(add(2, 3))\n"
+
+    def test_import_statement_gets_actionable_alternative(self):
+        self.harness.start_session(self.SIMPLE, "prog.py")
+        result = self.harness.execute_tool_call(
+            _tool("run_expression", {"expression": "import os; os.getcwd()"})
+        )
+        self.assertIn("__import__", result)
+        self.assertIn("bash tool", result)
+
+    def test_shell_command_still_rejected(self):
+        self.harness.start_session(self.SIMPLE, "prog.py")
+        result = self.harness.execute_tool_call(
+            _tool("run_expression", {"expression": "pytest -xvs test_prog.py"})
+        )
+        self.assertIn("bash tool", result)
+
+    def test_nameerror_lists_available_names(self):
+        self.harness.start_session(self.SIMPLE, "prog.py")
+        # Break inside add() so a/b/total are in scope, then probe a bad name.
+        self.harness.execute_tool_call(_tool("add_breakpoint", {"line": 2}))
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        result = self.harness.execute_tool_call(
+            _tool("run_expression", {"expression": "nonexistent_var"})
+        )
+        self.assertIn("NameError", result)
+        self.assertIn("Available names", result)
+        self.assertIn("a", result)
+
+    def test_valid_expression_renders_value(self):
+        self.harness.start_session(self.SIMPLE, "prog.py")
+        result = self.harness.execute_tool_call(_tool("run_expression", {"expression": "1 + 1"}))
+        self.assertIn("2", result)
+
+
 # --------------------------------------------------------------------------
 # restart reloads post-edit code; collection-error honesty
 # --------------------------------------------------------------------------
+
+class TestStartDebuggerReloadAndCollection(_HarnessCase):
+    def test_restart_reloads_edited_code(self):
+        self.harness.start_session("msg = 'old_value'\nprint(msg)\n", "prog.py")
+        self.assertTrue(self.harness.current_session.is_alive())
+        # Edit the file on disk, then restart via start_debugger.
+        self._write("prog.py", "msg = 'new_value'\nprint(msg)\n")
+        self.harness.execute_tool_call(_tool("start_debugger", {"file_path": "prog.py"}))
+        result = self.harness.execute_tool_call(_tool("list_code", {"start": 1, "end": 2}))
+        self.assertIn("new_value", result)
+        self.assertNotIn("old_value", result)
+
+    def test_collection_error_returns_honest_error(self):
+        # A test file with a syntax error can't be collected; the message must
+        # NOT claim the session started.
+        self._write("test_broken.py", "def test_x(:\n    pass\n")
+        result = self.harness.execute_tool_call(_tool("start_debugger", {"file_path": "test_broken.py"}))
+        self.assertIn("Error", result)
+        self.assertNotIn("Debugging session started", result)
+        self.assertFalse(
+            self.harness.current_session is not None
+            and self.harness.current_session.is_alive()
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
