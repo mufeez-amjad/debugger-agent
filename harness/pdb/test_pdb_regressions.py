@@ -266,6 +266,30 @@ NESTED_PROGRAM = (
 )
 
 
+class TestFrameReturn(_HarnessCase):
+    def test_step_out_reports_frame_return_not_completion(self):
+        self.harness.start_session(NESTED_PROGRAM, "prog.py")
+        self.harness.execute_tool_call(_tool("add_breakpoint", {"line": 2}))
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        result = self.harness.execute_tool_call(_tool("step_out"))
+        self.assertNotIn("Program execution completed", result)
+        self.assertIn("Returned from inner", result)
+        # Execution has not ended.
+        self.assertTrue(self.harness.current_session.is_alive())
+
+    def test_frame_return_carries_code_context_window(self):
+        # The frame-return text drops pdb's `> file(line)` marker. A return
+        # event must still carry a numbered source window, like every other
+        # step.
+        self.harness.start_session(NESTED_PROGRAM, "prog.py")
+        self.harness.execute_tool_call(_tool("add_breakpoint", {"line": 2}))
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        result = self.harness.execute_tool_call(_tool("step_out"))
+        self.assertIn("Returned from inner", result)
+        self.assertIn("Code context (prog.py):", result)
+        self.assertIn("->", result)
+
+
 # --------------------------------------------------------------------------
 # list_code file header / file arg; cross-file breakpoint path
 # --------------------------------------------------------------------------
@@ -280,6 +304,51 @@ SUB_TEST = (
     "def test_load():\n"
     "    assert load('x') == 'x'\n"
 )
+
+
+class TestListCodeAndCrossFile(_HarnessCase):
+    def test_list_code_has_file_header(self):
+        self.harness.start_session(NESTED_PROGRAM, "prog.py")
+        result = self.harness.execute_tool_call(_tool("list_code", {"start": 1, "end": 4}))
+        self.assertIn("File:", result)
+        self.assertIn("prog.py", result)
+
+    def test_list_code_file_arg_reads_fresh_from_disk(self):
+        self.harness.start_session(NESTED_PROGRAM, "prog.py")
+        other = self._write("other.py", "ALPHA = 1\nBETA = 2\nGAMMA = 3\n")
+        result = self.harness.execute_tool_call(
+            _tool("list_code", {"file": "other.py", "start": 1, "end": 3})
+        )
+        self.assertIn("File:", result)
+        self.assertIn("other.py", result)
+        self.assertIn("ALPHA = 1", result)
+        self.assertIn("GAMMA = 3", result)
+        # Nothing from the debugged file leaked in.
+        self.assertNotIn("def inner", result)
+
+    def test_list_code_file_arg_past_eof_errors(self):
+        self.harness.start_session(NESTED_PROGRAM, "prog.py")
+        self._write("other.py", "ALPHA = 1\n")
+        result = self.harness.execute_tool_call(
+            _tool("list_code", {"file": "other.py", "start": 50})
+        )
+        self.assertIn("beyond end of file", result)
+
+    def test_cross_file_breakpoint_uses_resolved_path(self):
+        # 'sub/loader.py' would fail "not found from sys.path" with the raw arg;
+        # the resolved absolute path makes it succeed and get hit.
+        self._write(os.path.join("sub", "loader.py"), SUB_LIB)
+        self._write(os.path.join("sub", "__init__.py"), "")
+        self._write("test_load.py", SUB_TEST)
+        self.harness.execute_tool_call(_tool("start_debugger", {"file_path": "test_load.py"}))
+        result = self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "sub/loader.py", "lines": [2]}]})
+        )
+        self.assertIn("Breakpoint set", result)
+        self.assertNotIn("not found", result)
+        cont = self.harness.execute_tool_call(_tool("continue_execution"))
+        self.assertNotIn("WITHOUT stopping", cont)
+        self.assertEqual(self.harness.current_session.current_position["line"], 2)
 
 
 # --------------------------------------------------------------------------
