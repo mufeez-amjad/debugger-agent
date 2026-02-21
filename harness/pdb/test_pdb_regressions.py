@@ -189,6 +189,40 @@ WORKER_TEST = (
 )
 
 
+class TestWorkerThreadTracing(_HarnessCase):
+    def setUp(self):
+        super().setUp()
+        self._write("worker_lib.py", WORKER_LIB)
+        self._write("test_worker.py", WORKER_TEST)
+
+    def test_worker_thread_breakpoint_fires_by_default(self):
+        self.harness.execute_tool_call(_tool("start_debugger", {"file_path": "test_worker.py"}))
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "worker_lib.py", "lines": [4]}]})
+        )
+        result = self.harness.execute_tool_call(_tool("continue_execution"))
+        self.assertNotIn("WITHOUT stopping", result)
+        self.assertTrue(self.harness.current_session.is_alive())
+        self.assertEqual(self.harness.current_session.current_position["line"], 4)
+
+    def test_worker_thread_breakpoint_missed_when_disabled(self):
+        # With thread tracing off, the worker breakpoint is missed and the
+        # recovery diagnostic names the worker-thread cause.
+        self.harness.start_session  # ensure attribute exists
+        os.environ["LLM_DEBUGGER_THREAD_TRACE"] = "0"
+        try:
+            self.harness.execute_tool_call(_tool("start_debugger", {"file_path": "test_worker.py"}))
+            self.assertFalse(self.harness.current_session.thread_tracing_enabled)
+            self.harness.execute_tool_call(
+                _tool("add_breakpoint", {"breakpoints": [{"file": "worker_lib.py", "lines": [4]}]})
+            )
+            result = self.harness.execute_tool_call(_tool("continue_execution"))
+            self.assertIn("WITHOUT stopping", result)
+            self.assertIn("worker thread", result)
+        finally:
+            os.environ.pop("LLM_DEBUGGER_THREAD_TRACE", None)
+
+
 # --------------------------------------------------------------------------
 # missed-breakpoint recovery carries the test result
 # --------------------------------------------------------------------------
@@ -199,6 +233,22 @@ FAILING_TEST = (
     "def test_x():\n"        # 3
     "    assert 1 == 2\n"    # 4
 )
+
+
+class TestMissedBreakpointRecoveryDetail(_HarnessCase):
+    def test_recovery_includes_test_result_and_restart_note(self):
+        self._write("test_fail.py", FAILING_TEST)
+        self.harness.execute_tool_call(_tool("start_debugger", {"file_path": "test_fail.py"}))
+        # Breakpoint inside helper(), which the failing test never calls.
+        self.harness.execute_tool_call(_tool("add_breakpoint", {"line": 2}))
+        result = self.harness.execute_tool_call(_tool("continue_execution"))
+        self.assertIn("WITHOUT stopping", result)
+        # The full PASSED/FAILED + assertion output is surfaced, not discarded.
+        self.assertIn("Test result from that run", result)
+        self.assertTrue("assert" in result or "FAILED" in result or "1 == 2" in result)
+        # And it says the session was restarted.
+        self.assertIn("RESTARTED", result)
+        self.assertTrue(self.harness.current_session.is_alive())
 
 
 # --------------------------------------------------------------------------
