@@ -618,6 +618,31 @@ PRERUN_TEST = (
 )
 
 
+class TestListCodePreRunGuard(_HarnessCase):
+    def test_bare_list_code_before_continue_returns_guidance(self):
+        self._write("prerun_lib.py", PRERUN_LIB)
+        self._write("prerun_test.py", PRERUN_TEST)
+        res = self.harness.execute_tool_call(
+            _tool("start_debugger", {"file_path": "prerun_test.py"})
+        )
+        self.assertIn("paused BEFORE the test run", res)
+
+        out = self.harness.execute_tool_call(_tool("list_code", {}))
+        self.assertIn("interpreter", out)
+        self.assertNotIn("The pytest entry point", out)
+
+    def test_list_code_with_file_arg_still_reads_from_disk_pre_run(self):
+        self._write("prerun_lib.py", PRERUN_LIB)
+        self._write("prerun_test.py", PRERUN_TEST)
+        self.harness.execute_tool_call(
+            _tool("start_debugger", {"file_path": "prerun_test.py"})
+        )
+        out = self.harness.execute_tool_call(
+            _tool("list_code", {"file": "prerun_lib.py", "start": 1, "end": 2})
+        )
+        self.assertIn("def f", out)
+
+
 # --------------------------------------------------------------------------
 # NameError('self') inside a comprehension frame gets accurate guidance (not a
 # "program may have finished" note).
@@ -635,3 +660,31 @@ GENEXPR_TEST = (
     "def test_total():\n"
     "    assert Fleet().total() == 6\n"
 )
+
+
+class TestComprehensionFrameNameError(_HarnessCase):
+    def test_self_nameerror_in_genexpr_frame_gets_comprehension_note(self):
+        self._write("genexpr_lib.py", GENEXPR_LIB)
+        self._write("genexpr_test.py", GENEXPR_TEST)
+        self.harness.execute_tool_call(
+            _tool("start_debugger", {"file_path": "genexpr_test.py"})
+        )
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint",
+                  {"breakpoints": [{"file": "genexpr_lib.py", "lines": [5]}]})
+        )
+        self.harness.execute_tool_call(_tool("continue_execution", {}))
+        # Step from the method line into the <genexpr> frame.
+        out = ""
+        for _ in range(4):
+            out = self.harness.execute_tool_call(_tool("step_into", {}))
+            if "<genexpr>" in out:
+                break
+        self.assertIn("<genexpr>", out)
+        res = self.harness.execute_tool_call(
+            _tool("run_expression",
+                  {"expression": "[s for s in self._summaries]"})
+        )
+        self.assertIn("NameError", res)
+        self.assertIn("comprehension", res)
+        self.assertNotIn("program may have finished", res)
