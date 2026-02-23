@@ -449,10 +449,157 @@ FIXTURE_TEST = (
 )
 
 
+class TestFixtureBreakpointsFire(_HarnessCase):
+    def setUp(self):
+        super().setUp()
+        self._write("fixture_lib.py", FIXTURE_LIB)
+        self._write("test_fixture.py", FIXTURE_TEST)
+        self.harness.execute_tool_call(
+            _tool("start_debugger", {"file_path": "test_fixture.py"})
+        )
+
+    def test_breakpoint_in_fixture_executed_code_is_hit(self):
+        # Breakpoint inside Engine.settle — executed ONLY from the fixture
+        # (test bodies are bare asserts). Must stop there, with the frame's
+        # locals inspectable.
+        self.harness.execute_tool_call(
+            _tool(
+                "add_breakpoint",
+                {"breakpoints": [{"file": "fixture_lib.py", "lines": [3]}]},
+            )
+        )
+        result = self.harness.execute_tool_call(_tool("continue_execution"))
+        self.assertNotIn("WITHOUT stopping", result)
+        self.assertIn("fixture_lib.py", result)
+        locals_result = self.harness.execute_tool_call(_tool("examine_locals"))
+        self.assertIn("vals", locals_result)
+
+    def test_missed_bp_on_dead_branch_recovers_without_blackout_claim(self):
+        # Line 5 never executes for these inputs — a genuine miss. The
+        # diagnostic must NOT claim fixture code is unbreakpointable (it no
+        # longer is), and the session must survive with breakpoints kept.
+        self.harness.execute_tool_call(
+            _tool(
+                "add_breakpoint",
+                {"breakpoints": [{"file": "fixture_lib.py", "lines": [5]}]},
+            )
+        )
+        result = self.harness.execute_tool_call(_tool("continue_execution"))
+        self.assertIn("WITHOUT stopping", result)
+        self.assertNotIn("NEVER fire", result)
+        self.assertIn("RESTARTED", result)
+        self.assertIn("breakpoints still applied", result)
+        session = self.harness.current_session
+        self.assertTrue(session.is_alive())
+        self.assertTrue(any(ln == 5 for _f, ln in session.breakpoints))
+
+    def test_startup_message_states_prerun_pause(self):
+        # Fresh session (setUp already started one; restart on same target).
+        result = self.harness.execute_tool_call(
+            _tool("start_debugger", {"file_path": "test_fixture.py"})
+        )
+        self.assertIn("BEFORE the test run", result)
+
+
 # --------------------------------------------------------------------------
 # Breakpoint B-window, step context parity, introspection position notes,
 # comprehension-scope NameError retry
 # --------------------------------------------------------------------------
+
+
+class TestObservationFixes(_HarnessCase):
+    def setUp(self):
+        super().setUp()
+        self._write("counter.py", COUNTER_LIB)
+        self._write("test_counter.py", COUNTER_TEST)
+        self.harness.execute_tool_call(
+            _tool("start_debugger", {"file_path": "test_counter.py"})
+        )
+
+    def test_breakpoint_set_shows_b_marked_window(self):
+        result = self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [5]}]})
+        )
+        self.assertIn("Line 5: Breakpoint set", result)
+        self.assertIn("Code context (counter.py):", result)
+        self.assertIn("B     5", result)
+
+    def test_step_into_and_step_out_show_code_context(self):
+        # step_over already appended a source window; step_into/step_out were
+        # bare pdb one-liners for no reason.
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [5]}]})
+        )
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        result = self.harness.execute_tool_call(_tool("step_into"))
+        self.assertIn("Code context", result)
+        self.assertIn("->", result)
+
+    def test_failed_introspection_reports_current_position(self):
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [5]}]})
+        )
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        # Missing attribute: AttributeError + position suffix.
+        result = self.harness.execute_tool_call(
+            _tool("run_expression", {"expression": "self._slotz"})
+        )
+        self.assertIn("AttributeError", result)
+        self.assertIn("Current position: counter.py:5", result)
+        # Missing name: available-names note + position suffix.
+        result = self.harness.execute_tool_call(
+            _tool("run_expression", {"expression": "[z for z in nonexistent_name]"})
+        )
+        self.assertIn("NameError", result)
+        self.assertIn("Current position: counter.py:5", result)
+
+    def test_comprehension_over_frame_local_evaluates(self):
+        # On pre-PEP-709 Pythons (such as 3.11) pdb's `p` gives a
+        # comprehension body its own scope that can't see frame locals like
+        # `self` — the harness retries with a merged namespace so the model
+        # gets the value either way. On 3.12+ the direct path already works.
+        self.harness.execute_tool_call(
+            _tool("add_breakpoint", {"breakpoints": [{"file": "counter.py", "lines": [5]}]})
+        )
+        self.harness.execute_tool_call(_tool("continue_execution"))
+        result = self.harness.execute_tool_call(
+            _tool(
+                "run_expression",
+                {"expression": "[(k, v) for k, v in self.values.items()]"},
+            )
+        )
+        self.assertNotIn("NameError", result)
+
+    def test_comprehension_retry_uses_merged_namespace_on_nameerror(self):
+        # Simulate the 3.11 failure regardless of the local interpreter: the
+        # first `p` returns the comprehension-scope NameError, the merged-eval
+        # retry returns the value.
+        calls = []
+
+        class _FakeSession:
+            current_position = {"file": "counter.py", "line": 5}
+
+            def send_command(self, cmd, timeout=None):
+                calls.append(cmd)
+                if cmd.startswith("p "):
+                    return "*** NameError: name 'self' is not defined"
+                if cmd.startswith("!print(repr(eval("):
+                    return "[('a', 1)]"
+                return ""
+
+        real_session = self.harness.current_session
+        try:
+            self.harness.current_session = _FakeSession()
+            result = self.harness.execute_tool_call(
+                _tool(
+                    "run_expression",
+                    {"expression": "[(k, self.values[k]) for k in self.values]"},
+                )
+            )
+        finally:
+            self.harness.current_session = real_session
+        self.assertEqual(result, "[('a', 1)]")
+        self.assertTrue(any(c.startswith("!print(repr(eval(") for c in calls))
 
 
 # --------------------------------------------------------------------------
