@@ -163,3 +163,38 @@ class TestTruncation:
         ]
 
         assert _extract_latest_state_summary(msgs) == real_state
+
+
+class TestEdgeCases:
+    def test_empty_messages(self):
+        assert truncate_messages([], max_tokens=100) == []
+
+    def test_no_user_at_end_falls_back_cleanly(self):
+        msgs = [
+            _msg("system", "sys"),
+            _msg("assistant", "response with no following user"),
+        ]
+        result = truncate_messages(msgs, max_tokens=1000)
+        assert result == msgs
+
+    def test_only_system_messages(self):
+        msgs = [_msg("system", "a"), _msg("system", "b")]
+        result = truncate_messages(msgs, max_tokens=1000)
+        assert result == msgs
+
+    def test_limit_smaller_than_system_plus_user_returns_minimum(self):
+        """When even the must-keep set exceeds max_tokens, we still return it
+        (truncating further would drop the system prompt, which callers need).
+        """
+        tok = _CountingTokenizer()
+        msgs = [
+            _msg("system", "x" * 1000),
+            _msg("user", "old 1"),
+            _msg("assistant", "old 2"),
+            _msg("user", "x" * 1000),
+        ]
+        result = truncate_messages(msgs, max_tokens=5, tokenizer=tok)
+        # Must contain the system msg and the last user msg (no history)
+        assert result[0]["role"] == "system"
+        assert result[-1]["role"] == "user"
+        assert result[-1]["content"] == "x" * 1000
