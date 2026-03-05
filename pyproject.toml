@@ -5,8 +5,17 @@ description = "A debugging agent that drives a real pdb session, served from Mod
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+    "jinja2>=3.1",
     "pexpect>=4.9.0",
+    "tokenizers>=0.21",
+    "huggingface-hub>=0.30",
 ]
+
+[project.optional-dependencies]
+tui = ["textual>=0.80"]
+
+[project.scripts]
+debug = "debugger_agent.cli:main"
 
 [dependency-groups]
 dev = [
@@ -19,8 +28,11 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["common*", "harness*"]
+include = ["common*", "harness*", "debugger_agent*"]
+
+[tool.setuptools.package-data]
+common = ["chat_template_json.jinja", "hint_golden.json"]
 
 [tool.pytest.ini_options]
-testpaths = ["common", "harness"]
+testpaths = ["common", "harness", "debugger_agent"]
 python_files = ["test_*.py"]
