@@ -1,0 +1,83 @@
+{
+  "improve": {
+    "bash_cd_absolute_missing": "cd: /root/src: No such file or directory\n\nReminder: your workspace is /workspace/defect — every bash command already starts there. Use relative paths; do not `cd` to absolute directories you have not listed.",
+    "bash_cd_relative_missing_not_matched": "cd: nope: No such file or directory",
+    "pytest_collection_error": "COLLECTION ERROR: your last edit likely broke an import or syntax — ImportError while importing test module 'engine_test.py'. | engine.py:12: SyntaxError: invalid syntax. Fix the file before rerunning.\n\nImportError while importing test module 'engine_test.py'.\nengine.py:12: SyntaxError: invalid syntax\n!!!!!! Interrupted: 1 error during collection !!!!!!\n1 error in 0.11s",
+    "pytest_collected_nothing": "collected 0 items\n\nno tests ran in 0.01s\n\nHint: pytest ran 0 tests — the test path doesn't exist from your CURRENT directory. Your workspace is /workspace/defect and every bash command starts there; rerun pytest with the test file's relative path (no `cd` needed). Path problem, not a test failure.",
+    "pytest_failed_rerun_without_edit": "1 failed, 42 passed in 0.30s",
+    "pytest_failed_first_run": "1 failed, 42 passed in 0.30s",
+    "pytest_failed_after_edit": "1 failed, 42 passed in 0.30s",
+    "pytest_all_passing": "43 passed in 0.29s",
+    "sed_no_output": "(no output)\n\nHint: sed printed nothing — the line range is likely past end of file (line numbers shift after edits). Check length with `wc -l <file>` and re-read in range.",
+    "sed_with_output": "def allocate(order):\n    return None",
+    "bash_clean_result_no_error": "engine.py\nengine_test.py\nstrategy.py",
+    "file_not_found_quoted": "Error: [Errno 2] No such file or directory: 'strategy.py'\n\nHint: File 'strategy.py' not found. Run `ls` or `find . -maxdepth 1` to list files, then `wc -l -c strategy.py` to confirm the path before calling edit_file.",
+    "file_not_found_unnamed": "Error: FileNotFoundError raised while opening the target\n\nHint: File not found. Use `ls` and `wc -l -c <file>` to verify the exact path before editing.",
+    "edit_string_not_found": "Error: string not found in file. Closest region:\n  12 | def rank(lots):",
+    "attribute_error_pdb_in_init": "*** Error: AttributeError: 'Report' object has no attribute 'flags'\n\nHint: stopped inside __init__ (report.py:18); pdb pauses BEFORE the reported line, so self.flags isn't assigned YET. step_over past the assignment first.",
+    "attribute_error_pdb_outside_init": "*** Error: AttributeError: 'Report' object has no attribute 'flags'\n\nHint: 'flags' does not exist on this object here. pdb stops BEFORE the reported line — if you are in the method that assigns it, step_over past the assignment; otherwise read the class definition for its attributes.",
+    "attribute_error_frame_from_step_over": "*** Error: AttributeError: 'Report' object has no attribute 'flags'\n\nHint: stopped inside __init__ (report.py:18); pdb pauses BEFORE the reported line, so self.flags isn't assigned YET. step_over past the assignment first.",
+    "attribute_error_pdb_not_self": "*** Error: AttributeError: 'Report' object has no attribute 'flags'\n\nHint: Method/attribute 'flags' doesn't exist. Read the class definition to see available methods.",
+    "attribute_error_non_pdb_tool": "AttributeError: 'Catalog' object has no attribute 'to_each'\n\nHint: Method/attribute 'to_each' doesn't exist. Read the class definition to see available methods.",
+    "attribute_error_no_name": "Error: AttributeError raised during call\n\nHint: Method or attribute doesn't exist. Read the class/object definition to check available attributes.",
+    "syntax_error_heredoc": "  File \"<stdin>\", line 3\n    SyntaxError: invalid syntax\n\nHint: Check your code syntax. If using cat > with a heredoc, ensure 'EOF' markers are correct and Python indentation is valid (prefer edit_file/write_file over heredoc).",
+    "syntax_error_plain": "  File \"engine.py\", line 30\n    SyntaxError: invalid syntax\n\nHint: Check the code syntax near the reported line.",
+    "syntax_error_from_pdb": "*** SyntaxError: invalid syntax\n\nHint: Check the code syntax near the reported line.",
+    "timeout_interactive_pdb": "Error: tool execution timed out; the pdb child was left interactive\n\nHint: Interactive debugger commands timeout. Use non-interactive debugging: read code with sed, add print statements, or use debugger tools.",
+    "timeout_generic": "Error: command timed out after 30s\n\nHint: Command timed out (30s limit). Try simpler commands or read files in smaller chunks.",
+    "timeout_word_in_source_not_a_timeout": "def retry(fn, timeout=30):\n    # Error handling below\n    pass",
+    "unrecognised_error_passthrough": "Error: something went sideways in a way nothing matches"
+  },
+  "revisit": [
+    [
+      "step_over",
+      ""
+    ],
+    [
+      "step_over",
+      ""
+    ],
+    [
+      "step_over",
+      ""
+    ],
+    [
+      "step_over",
+      ""
+    ],
+    [
+      "step_over",
+      ""
+    ],
+    [
+      "step_over",
+      ""
+    ],
+    [
+      "continue_execution",
+      ""
+    ],
+    [
+      "step_into",
+      ""
+    ],
+    [
+      "examine_locals",
+      ""
+    ],
+    [
+      "step_over",
+      ""
+    ],
+    [
+      "step_over",
+      ""
+    ]
+  ],
+  "format": {
+    "format_hinted": "Tool: bash\nResult: cd: /root: No such file or directory\n\nReminder: your workspace is /workspace/defect — every bash command already starts there. Use relative paths; do not `cd` to absolute directories you have not listed.",
+    "format_raw": "Tool: bash\nResult: cd: /root: No such file or directory",
+    "format_truncated": "Tool: bash\nResult: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n[... 5099 chars omitted ...]\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "format_short": "Tool: bash\nResult: ok"
+  }
+}
