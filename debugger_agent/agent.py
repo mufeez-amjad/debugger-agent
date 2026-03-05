@@ -37,6 +37,7 @@ from common.prompts import (
     WORKSPACE_LINE,
     build_initial_observation,
 )
+from common.tool_call_schema import structural_tag_json
 from common.tools import get_openai_tools
 from harness.debug_session import DebugSession
 
@@ -45,6 +46,17 @@ from .tokenization import load_tokenizer
 
 # The model emits one tool call per turn; this stop string ends the turn there.
 _STOP = ["</tool_call>"]
+
+_STRUCTURAL_TAG_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _tool_call_structural_tag() -> Dict[str, Any]:
+    """The xgrammar structural tag that constrains tool-call JSON."""
+    global _STRUCTURAL_TAG_CACHE
+    if _STRUCTURAL_TAG_CACHE is None:
+        _STRUCTURAL_TAG_CACHE = json.loads(structural_tag_json(strict_per_tool=False))
+    return _STRUCTURAL_TAG_CACHE
+
 
 DEFAULT_MODEL_URL = "http://localhost:8000"
 # The --served-model-name in inference_server/modal_app.py.
@@ -143,6 +155,10 @@ class AgentConfig:
     # but vLLM enforces --api-key, so this is required there; a local
     # server has no key and leaves it None.
     api_key: Optional[str] = None
+    # Decode tool calls under an xgrammar structural tag. The grammar makes
+    # invalid tool-call JSON unrepresentable. Unconstrained, that output lands
+    # in `content` as dead text and the turn is lost.
+    guided_decoding: bool = True
     # The budget is never shown to the model, so a low cap silently cuts off
     # sessions that the model would finish.
     max_turns: int = 50
@@ -591,6 +607,8 @@ class DebugAgent:
             "stop": _STOP,
             "include_stop_str_in_output": True,
         }
+        if self.config.guided_decoding:
+            payload["response_format"] = _tool_call_structural_tag()
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
