@@ -198,3 +198,72 @@ class TestEdgeCases:
         assert result[0]["role"] == "system"
         assert result[-1]["role"] == "user"
         assert result[-1]["content"] == "x" * 1000
+
+
+class TestChainStability:
+    """Drop-in-blocks hysteresis (stability_block) keeps the retained history
+    window identical across steps, so prefix reuse survives truncation."""
+
+    @staticmethod
+    def _grow_and_truncate(n_turns, stability_block, max_tokens=200):
+        """Simulate a session: each turn appends assistant+tool, then the
+        prompt is built via truncate_messages. Returns the list of retained
+        message-lists (one per step)."""
+        msgs = [_msg("system", "sys"), _msg("user", "task description")]
+        outs = []
+        for i in range(n_turns):
+            msgs.append(_msg("assistant", f"thinking {i} " + "a" * 120))
+            msgs.append(_msg("tool", f"result {i} " + "b" * 120))
+            outs.append(
+                truncate_messages(
+                    list(msgs), max_tokens=max_tokens,
+                    stability_block=stability_block,
+                )
+            )
+        return outs
+
+    @staticmethod
+    def _prefix_extends(prev, cur):
+        """cur extends prev iff prev (minus nothing) is a prefix of cur."""
+        if len(cur) < len(prev):
+            return False
+        return all(cur[i] == prev[i] for i in range(len(prev)))
+
+    def test_quantized_start_yields_stable_prefixes(self):
+        outs = self._grow_and_truncate(30, stability_block=8)
+        # Count steps whose prompt extends the previous step's prompt.
+        chained = sum(
+            1 for a, b in zip(outs, outs[1:]) if self._prefix_extends(a, b)
+        )
+        # Legacy behavior for comparison
+        outs_legacy = self._grow_and_truncate(30, stability_block=0)
+        chained_legacy = sum(
+            1 for a, b in zip(outs_legacy, outs_legacy[1:])
+            if self._prefix_extends(a, b)
+        )
+        assert chained > chained_legacy, (
+            f"quantized should chain more: {chained} vs {chained_legacy}"
+        )
+        # With block=8 (4 turns per block), most steps should chain.
+        assert chained >= 15, f"expected >=15/29 chained steps, got {chained}"
+
+    def test_quantized_still_fits_budget(self):
+        for out in self._grow_and_truncate(30, stability_block=8):
+            total_chars = sum(len(str(m.get("content", ""))) for m in out)
+            assert total_chars // 6 <= 200
+
+    def test_block_zero_matches_legacy_minimal_drop(self):
+        a = self._grow_and_truncate(20, stability_block=0)
+        b = self._grow_and_truncate(20, stability_block=1)
+        assert a == b
+
+    def test_never_starts_on_tool_message(self):
+        for out in self._grow_and_truncate(30, stability_block=8):
+            non_system = [m for m in out if m["role"] != "system"]
+            # skip pinned head (user task) — find first history msg after pins
+            for m in non_system:
+                if m["role"] == "assistant":
+                    break
+                assert m["role"] in ("user",), (
+                    "history window must not start on a tool result"
+                )
