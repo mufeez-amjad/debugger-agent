@@ -114,6 +114,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         "session before it finishes.")
     p.add_argument("--temperature", type=float, default=0.1)
     p.add_argument("--max-tokens", type=int, default=1024)
+    p.add_argument("--no-color", action="store_true", help="Disable ANSI color.")
     return p
 
 
@@ -139,7 +140,7 @@ def main(argv=None) -> None:
     )
     agent = DebugAgent(codebase_dir=codebase_dir, prompt=args.prompt, config=config)
 
-    color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+    color = (not args.no_color) and sys.stdout.isatty() and not os.environ.get("NO_COLOR")
     sys.exit(render_stdout(agent.run(), color=color))
 
 
