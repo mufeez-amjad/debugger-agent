@@ -8,6 +8,8 @@ Code) shell out to.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
 import os
 import sys
 from pathlib import Path
@@ -89,6 +91,22 @@ def render_stdout(event_stream: Iterator[events.Event], *, color: bool) -> int:
     return exit_code
 
 
+def render_json(event_stream: Iterator[events.Event]) -> int:
+    """Emit each event as a JSON line (JSONL).
+
+    This is the machine-readable stream consumed by an external UI over a pipe, and by other agents (opencode, Claude Code) that
+    shell out and parse structured output. Returns a process exit code.
+    """
+    exit_code = 1
+    for ev in event_stream:
+        record = {"type": type(ev).__name__, **dataclasses.asdict(ev)}
+        sys.stdout.write(json.dumps(record, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+        if isinstance(ev, events.SessionComplete):
+            exit_code = 0 if ev.success else 1
+    return exit_code
+
+
 # ── argument parsing ───────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -97,6 +115,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Run the debugging agent against a failing test.",
     )
     p.add_argument("-p", "--prompt", required=True, help="What to debug/fix.")
+    p.add_argument("--json", action="store_true",
+                   help="Emit the event stream as JSONL (for external UIs / agents).")
     p.add_argument("--dir", default=None,
                    help="Directory to debug in (default: current working dir).")
     p.add_argument("--model-url", default=os.environ.get("LLM_DEBUGGER_URL", DEFAULT_MODEL_URL),
@@ -139,6 +159,9 @@ def main(argv=None) -> None:
         max_tokens=args.max_tokens,
     )
     agent = DebugAgent(codebase_dir=codebase_dir, prompt=args.prompt, config=config)
+
+    if args.json:
+        sys.exit(render_json(agent.run()))
 
     color = (not args.no_color) and sys.stdout.isatty() and not os.environ.get("NO_COLOR")
     sys.exit(render_stdout(agent.run(), color=color))
