@@ -2,7 +2,7 @@
 
 Default (non-alt-screen): stream the agent's reasoning + tool calls + tool
 results to stdout — scriptable, and the surface other agents (opencode, Claude
-Code) shell out to.
+Code) shell out to. `--view` launches the Textual 4-pane TUI instead.
 """
 
 from __future__ import annotations
@@ -115,6 +115,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Run the debugging agent against a failing test.",
     )
     p.add_argument("-p", "--prompt", required=True, help="What to debug/fix.")
+    p.add_argument("--view", action="store_true",
+                   help="Launch the alt-screen 4-pane TUI instead of stdout.")
     p.add_argument("--json", action="store_true",
                    help="Emit the event stream as JSONL (for external UIs / agents).")
     p.add_argument("--dir", default=None,
@@ -159,6 +161,17 @@ def main(argv=None) -> None:
         max_tokens=args.max_tokens,
     )
     agent = DebugAgent(codebase_dir=codebase_dir, prompt=args.prompt, config=config)
+
+    if args.view:
+        try:
+            from .tui import run_tui  # imported lazily (TUI dependency)
+        except ImportError:
+            sys.stderr.write(
+                "error: --view needs Textual. Install it with:\n"
+                "  pip install 'debugger-agent[tui]'   (or: pip install textual)\n"
+            )
+            sys.exit(2)
+        sys.exit(run_tui(agent))
 
     if args.json:
         sys.exit(render_json(agent.run()))
