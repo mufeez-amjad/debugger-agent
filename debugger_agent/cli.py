@@ -136,6 +136,13 @@ def _build_parser() -> argparse.ArgumentParser:
                         "session before it finishes.")
     p.add_argument("--temperature", type=float, default=0.1)
     p.add_argument("--max-tokens", type=int, default=1024)
+    p.add_argument("--tokenizer", default=os.environ.get("LLM_DEBUGGER_TOKENIZER"),
+                   help="tokenizer.json for exact prompt-token counting: a file, "
+                        "a directory, or an HF repo id (a repo id may download). "
+                        "Defaults to $LLM_DEBUGGER_TOKENIZER, else the local HF "
+                        "cache. Without one the context fit is estimated from "
+                        "character counts, which is conservative and drops "
+                        "history earlier than necessary.")
     p.add_argument("--no-color", action="store_true", help="Disable ANSI color.")
     return p
 
@@ -159,6 +166,7 @@ def main(argv=None) -> None:
         max_turns=args.max_turns,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        tokenizer=args.tokenizer,
     )
     agent = DebugAgent(codebase_dir=codebase_dir, prompt=args.prompt, config=config)
 
