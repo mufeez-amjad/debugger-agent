@@ -144,6 +144,11 @@ def _build_parser() -> argparse.ArgumentParser:
                         "character counts, which is conservative and drops "
                         "history earlier than necessary.")
     p.add_argument("--no-color", action="store_true", help="Disable ANSI color.")
+    p.add_argument("--context-limit", type=int, default=None,
+                   help="Server context window in tokens. Defaults to the "
+                        "deployed endpoint's. Only ever an upper bound: if the "
+                        "server reports a smaller window the agent adopts that "
+                        "instead, so this rarely needs setting.")
     return p
 
 
@@ -163,6 +168,7 @@ def main(argv=None) -> None:
         model_url=args.model_url,
         model_name=args.model_name,
         api_key=api_key,
+        **({"context_limit": args.context_limit} if args.context_limit else {}),
         max_turns=args.max_turns,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
