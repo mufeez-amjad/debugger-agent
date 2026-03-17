@@ -144,6 +144,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         "character counts, which is conservative and drops "
                         "history earlier than necessary.")
     p.add_argument("--no-color", action="store_true", help="Disable ANSI color.")
+    p.add_argument("--no-guided-decoding", action="store_true",
+                   help="Decode tool calls without the xgrammar structural tag. "
+                        "Use only to measure raw format robustness.")
     p.add_argument("--context-limit", type=int, default=None,
                    help="Server context window in tokens. Defaults to the "
                         "deployed endpoint's. Only ever an upper bound: if the "
@@ -168,6 +171,7 @@ def main(argv=None) -> None:
         model_url=args.model_url,
         model_name=args.model_name,
         api_key=api_key,
+        guided_decoding=not args.no_guided_decoding,
         **({"context_limit": args.context_limit} if args.context_limit else {}),
         max_turns=args.max_turns,
         temperature=args.temperature,
