@@ -152,6 +152,11 @@ def _build_parser() -> argparse.ArgumentParser:
                         "deployed endpoint's. Only ever an upper bound: if the "
                         "server reports a smaller window the agent adopts that "
                         "instead, so this rarely needs setting.")
+    p.add_argument("--no-hints", action="store_true",
+                   help="Do not append the observation hints (for example, a "
+                        "wrong path or an empty pytest run). The model saw these "
+                        "hints in training; use this only to measure behaviour "
+                        "without them.")
     return p
 
 
@@ -172,6 +177,7 @@ def main(argv=None) -> None:
         model_name=args.model_name,
         api_key=api_key,
         guided_decoding=not args.no_guided_decoding,
+        hints=not args.no_hints,
         **({"context_limit": args.context_limit} if args.context_limit else {}),
         max_turns=args.max_turns,
         temperature=args.temperature,
