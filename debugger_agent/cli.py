@@ -160,8 +160,32 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _ensure_interpreter_on_path() -> None:
+    """Put our own interpreter's bin dir on PATH for the agent's `bash` tool.
+
+    `harness.bash` spawns the shell with `os.environ.copy()`, so whatever PATH
+    this process has is what the model gets. The model reaches for both
+    `pytest -x -q` and `python -m pytest`; on a machine whose default PATH has
+    no bare `python` (a venv that was never activated, a framework-only Python)
+    the latter dies with exit 127 and the model burns turns on a phantom
+    environment problem. Prepending sys.executable's directory makes `python`
+    and `pytest` resolve to the same interpreter running the agent.
+
+    Scoped to this CLI process on purpose. The shared harness does not change
+    the subprocess environment for other callers.
+    """
+    # NOT .resolve(): in a venv, sys.executable is a symlink to the base
+    # interpreter, and resolving it would point PATH at that base install —
+    # which has no pytest and none of the venv's site-packages.
+    bindir = str(Path(sys.executable).parent)
+    current = os.environ.get("PATH", "")
+    if bindir not in current.split(os.pathsep):
+        os.environ["PATH"] = bindir + os.pathsep + current if current else bindir
+
+
 def main(argv=None) -> None:
     args = _build_parser().parse_args(argv)
+    _ensure_interpreter_on_path()
     codebase_dir = os.path.abspath(args.dir) if args.dir else os.getcwd()
     api_key = args.api_key or os.environ.get("VLLM_API_KEY")
     if not api_key and "modal" in args.model_url:
