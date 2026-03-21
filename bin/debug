@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Runs the agent as `debug -p '...'` from any directory. The script prefers the
+# repository venv, because the system python3 has no dependencies installed.
+set -euo pipefail
+
+# An install on PATH is usually a symlink, so resolve it to find the repository.
+# BSD readlink has no -f on older macOS.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [ "${src#/}" != "$src" ] || src="$dir/$src"   # relative link -> absolute
+done
+
+root="$(cd -P "$(dirname "$src")/.." && pwd)"
+py="$root/.venv/bin/python"
+[ -x "$py" ] || py="$(command -v python3)"
+
+# A checkout with no venv still needs the repository on the import path.
+export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+
+exec "$py" -m debugger_agent "$@"
