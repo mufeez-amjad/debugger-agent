@@ -13,14 +13,15 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=0.80"]
+serve = ["modal>=1.5"]
 
 [project.scripts]
 debug = "debugger_agent.cli:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
+    "pytest==9.0.2",
+    "pytest-asyncio==1.3.0",
 ]
 
 [build-system]
@@ -34,5 +35,5 @@ include = ["common*", "harness*", "debugger_agent*"]
 common = ["chat_template_json.jinja", "hint_golden.json"]
 
 [tool.pytest.ini_options]
-testpaths = ["common", "harness", "debugger_agent"]
+testpaths = ["common", "harness", "debugger_agent", "inference_server"]
 python_files = ["test_*.py"]
