@@ -37,7 +37,9 @@ HF_CACHE = "/root/.cache/huggingface"
 GPU = "A100-80GB"  # 57 GiB of bf16 weights plus the KV cache
 VLLM_PORT = 8000
 MINUTES = 60
-SCALEDOWN_WINDOW = 1 * MINUTES
+# A debug run sends requests seconds apart, so it stays warm by itself. This
+# window covers the gaps between runs, when a person reads the diff and retries.
+SCALEDOWN_WINDOW = 10 * MINUTES
 MAX_MODEL_LEN = 8192
 
 # Training rendered tool calls as JSON with this template. The base model
