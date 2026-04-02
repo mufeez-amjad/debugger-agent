@@ -152,7 +152,14 @@ class Server:
             "hermes",
             "--uvicorn-log-level=info",
         ]
-        print("launching vllm")
+        # Redact the key: container logs are retained and readable in the Modal
+        # dashboard, so echoing the raw command leaks the bearer token that
+        # guards this endpoint. (vLLM also prints it in its own "non-default
+        # args" line at INFO — see the note on --api-key above.)
+        _secret = os.environ["VLLM_API_KEY"]
+        print("launching:", " ".join(
+            "***REDACTED***" if part == _secret else part for part in cmd
+        ))
         self.process = subprocess.Popen(cmd)
 
         deadline = time.time() + 14 * MINUTES
