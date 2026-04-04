@@ -160,7 +160,10 @@ class Server:
         print("launching:", " ".join(
             "***REDACTED***" if part == _secret else part for part in cmd
         ))
-        self.process = subprocess.Popen(cmd)
+        # Both models are cached on the Volume, so serve offline. This skips about
+        # 20 s of Hub metadata requests per boot. The setting applies to this
+        # process only because prepare_model shares the image and needs the Hub.
+        self.process = subprocess.Popen(cmd, env={**os.environ, "HF_HUB_OFFLINE": "1"})
 
         deadline = time.time() + 14 * MINUTES
         while True:
