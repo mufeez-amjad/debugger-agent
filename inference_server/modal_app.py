@@ -151,6 +151,11 @@ class Server:
             "--tool-call-parser",
             "hermes",
             "--uvicorn-log-level=info",
+            # The HF cache Volume is a 9p mount, which vLLM doesn't recognize
+            # as a network FS, so it defaults to sequential shard reads
+            # (~0.8 GiB/s, 70 s for the 57 GiB checkpoint). Force the parallel
+            # prefetcher it uses on NFS/Lustre.
+            "--safetensors-load-strategy=prefetch",
         ]
         # Redact the key: container logs are retained and readable in the Modal
         # dashboard, so echoing the raw command leaks the bearer token that
