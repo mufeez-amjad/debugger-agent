@@ -7,6 +7,11 @@ and applies the adapter at inference time.
 The server is vLLM's OpenAI-compatible API on one A100-80GB. It scales to zero:
 you pay while a request is in flight, plus SCALEDOWN_WINDOW of idle time.
 
+Cold starts use GPU memory snapshots. The first boot starts vLLM, warms it up,
+puts the engine to sleep, and Modal checkpoints the container. Later boots
+restore the snapshot and wake the engine, which takes seconds. The first boots
+after a deploy still take the slow path while Modal records the snapshot.
+
 The endpoint is transport-public. Every request must carry the vLLM API key
 (Authorization: Bearer <key>) from the Modal secret `debugger-agent-vllm-key`.
 
@@ -60,6 +65,8 @@ vllm_image = (
             "HF_HUB_DISABLE_XET": "1",
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
             "VLLM_LOG_STATS_INTERVAL": "1",
+            # exposes /sleep and /wake_up, needed for the snapshot lifecycle
+            "VLLM_SERVER_DEV_MODE": "1",
         }
     )
     .add_local_file(CHAT_TEMPLATE_LOCAL, CHAT_TEMPLATE_REMOTE)
@@ -94,18 +101,27 @@ def _local(path: str) -> str:
     image=vllm_image,
     gpu=GPU,
     scaledown_window=SCALEDOWN_WINDOW,
-    startup_timeout=15 * MINUTES,
+    # The recording boot takes about 6.5 minutes in vLLM, then about 10 minutes
+    # while Modal writes the snapshot. A kill near the end would loop forever.
+    startup_timeout=30 * MINUTES,
+    # No Volume for /root/.cache/vllm here: compile artifacts must live in the
+    # container filesystem so the GPU snapshot captures them. Mounting them on
+    # a Volume breaks snapshot restore (uncommitted 9p paths vanish across
+    # boots: "failed to walk .../torch_compile_cache").
     volumes={HF_CACHE: hf_cache_vol},
     secrets=[modal.Secret.from_name("debugger-agent-vllm-key")],
     port=VLLM_PORT,
     target_concurrency=8,
     max_containers=1,  # handful of users; hard cost cap
+    enable_memory_snapshot=True,
+    experimental_options={"enable_gpu_snapshot": True},
     unauthenticated=True,  # transport-public; vLLM enforces the API key below
 )
 class Server:
-    @modal.enter()
-    def start_vllm(self):
-        """Boot vLLM and wait until it answers health checks."""
+    @modal.enter(snap=True)
+    def start_vllm_and_sleep(self):
+        """Slow path, runs only when no snapshot exists: boot vLLM, warm it up,
+        then put the engine to sleep so Modal checkpoints a quiescent state."""
         import requests
         from huggingface_hub import snapshot_download
 
@@ -151,6 +167,9 @@ class Server:
             "--tool-call-parser",
             "hermes",
             "--uvicorn-log-level=info",
+            # sleep/wake support; CUDA-graph capture is kept (no --enforce-eager)
+            # since the snapshot amortizes it across all future boots
+            "--enable-sleep-mode",
             # The HF cache Volume is a 9p mount, which vLLM doesn't recognize
             # as a network FS, so it defaults to sequential shard reads
             # (~0.8 GiB/s, 70 s for the 57 GiB checkpoint). Force the parallel
@@ -180,6 +199,32 @@ class Server:
             except requests.RequestException:
                 pass
             if time.time() > deadline:
-                raise TimeoutError("vllm did not become healthy")
+                raise TimeoutError("vllm did not become healthy before snapshot")
             time.sleep(5)
-        print("vllm ready")
+
+        # Warm up so tokenizer/kernels/caches are hot inside the snapshot.
+        for _ in range(3):
+            requests.post(
+                _local("/v1/chat/completions"),
+                headers={"Authorization": f"Bearer {os.environ['VLLM_API_KEY']}"},
+                json={
+                    "model": SERVED_NAME,
+                    "messages": [{"role": "user", "content": "warmup"}],
+                    "max_tokens": 8,
+                },
+                timeout=120,
+            ).raise_for_status()
+
+        # Level 1 sleep: KV cache freed, weights offloaded to host RAM — the
+        # state Modal captures in the GPU memory snapshot.
+        requests.post(_local("/sleep"), params={"level": "1"}, timeout=120).raise_for_status()
+        print("vllm asleep; ready for snapshot")
+
+    @modal.enter(snap=False)
+    def wake_vllm(self):
+        """Fast path, runs on every boot from a restored snapshot."""
+        import requests
+
+        requests.post(_local("/wake_up"), timeout=300).raise_for_status()
+        requests.get(_local("/health"), timeout=30).raise_for_status()
+        print("vllm awake")
