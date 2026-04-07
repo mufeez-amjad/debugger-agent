@@ -45,7 +45,10 @@ MINUTES = 60
 # A debug run sends requests seconds apart, so it stays warm by itself. This
 # window covers the gaps between runs, when a person reads the diff and retries.
 SCALEDOWN_WINDOW = 10 * MINUTES
-MAX_MODEL_LEN = 8192
+# The base model handles this length without RoPE scaling. A real repository
+# needs the room: the tool schemas and system prompt take about 2.6k tokens, and
+# a five-file causal chain takes about 4.5k more.
+MAX_MODEL_LEN = 32768
 
 # Training rendered tool calls as JSON with this template. The base model
 # carries the stock Qwen XML template, so --chat-template below is required.
@@ -111,7 +114,9 @@ def _local(path: str) -> str:
     volumes={HF_CACHE: hf_cache_vol},
     secrets=[modal.Secret.from_name("debugger-agent-vllm-key")],
     port=VLLM_PORT,
-    target_concurrency=8,
+    # About 13 GiB of KV budget remains after the weights, which is roughly 64k
+    # tokens in total. Two sessions fit; vLLM queues the rest.
+    target_concurrency=2,
     max_containers=1,  # handful of users; hard cost cap
     enable_memory_snapshot=True,
     experimental_options={"enable_gpu_snapshot": True},
