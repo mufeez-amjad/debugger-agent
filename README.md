@@ -2,6 +2,10 @@
 
 A post-trained model that debugs failing Python tests with a real `pdb` session.
 
+Accompanying post: [Training an LLM to use a Debugger](https://mufeezamjad.com/blog/training-llm-to-debug).
+
+<br>
+
 - `inference_server/`: Modal + vLLM server
 - `harness/`, `common/`: bash, pdb, and file tools
 - `debugger_agent/`, `bin/debug`: the CLI
